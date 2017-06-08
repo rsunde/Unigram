@@ -154,8 +154,8 @@
 
         <Style x:Key="MessageBubbleProfilePictureStyle" TargetType="controls:ProfilePictureView">
             <Setter Property="HorizontalAlignment" Value="Left"/>
-            <Setter Property="VerticalAlignment" Value="Bottom"/>
-            <Setter Property="Margin" Value="12,0,0,2"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Margin" Value="12,8,0,0"/>
             <Setter Property="Height" Value="32"/>
             <Setter Property="Width" Value="32"/>
         </Style>
@@ -349,14 +349,10 @@
                 </Grid.ColumnDefinitions>
                 <controls:ProfilePictureView x:Phase="3"
                                              x:Name="PhotoBubble"
+                                             Style="{StaticResource MessageBubbleProfilePictureStyle}"
                                              Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
                                              Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
-                                             Click="ProfileBubble_Click"
-                                             HorizontalAlignment="Left"
-                                             VerticalAlignment="Top"
-                                             Margin="12,8,0,0"
-                                             Width="32"
-                                             Height="32"/>
+                                             Click="ProfileBubble_Click"/>
                 <messages:MessageBubble ContextFlyout="{StaticResource MessageMenuFlyout}" Grid.Column="1"/>
 
                 <Border Visibility="{x:Bind Converter={StaticResource MessageToShareConverter}}"
@@ -381,12 +377,7 @@
                                              Style="{StaticResource MessageBubbleProfilePictureStyle}"
                                              Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
                                              Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
-                                             Click="ProfileBubble_Click"
-                                             HorizontalAlignment="Left"
-                                             VerticalAlignment="Top"
-                                             Margin="12,8,0,0"
-                                             Width="32"
-                                             Height="32"/>
+                                             Click="ProfileBubble_Click"/>
                 <messages:PhoneCallMessageBubble ContextFlyout="{StaticResource ServiceMenuFlyout}" Grid.Column="1"/>
             </Grid>
         </DataTemplate>

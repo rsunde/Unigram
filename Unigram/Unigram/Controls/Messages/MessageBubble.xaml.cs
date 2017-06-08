@@ -74,9 +74,7 @@ namespace Unigram.Controls.Messages
             {
                 if (IsFullMedia(message.Media))
                 {
-                    var left = -8;
                     var top = -4;
-                    var right = -10;
                     var bottom = -6;
 
                     if (message.Media.TypeId != TLType.MessageMediaVenue)
@@ -107,7 +105,7 @@ namespace Unigram.Controls.Messages
                         StatusToFullMedia();
                     }
 
-                    MediaControl.Margin = new Thickness(left, top, right, bottom);
+                    MediaControl.Margin = new Thickness(0, top, 0, bottom);
                     Grid.SetRow(StatusControl, caption ? 4 : 3);
                     Grid.SetRow(MessageControl, caption ? 4 : 2);
                 }

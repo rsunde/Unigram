@@ -7,8 +7,8 @@
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
             <SolidColorBrush x:Key="MessageForegroundBrush" Color="#FFFFFF"/>
-            <SolidColorBrush x:Key="MessageBackgroundBrush" Color="#1F2C36"/>
-            <SolidColorBrush x:Key="MessageBorderBrush" Color="#144D7B29"/>
+            <SolidColorBrush x:Key="MessageBackgroundBrush" Color="Transparent"/>
+            <SolidColorBrush x:Key="MessageBorderBrush" Color="Transparent"/>
             <SolidColorBrush x:Key="MessageSubtleLabelBrush" Color="#a0acb6"/>
             <SolidColorBrush x:Key="MessageSubtleGlyphBrush" Color="#a0acb6"/>
 
@@ -56,8 +56,8 @@
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
             <SolidColorBrush x:Key="MessageForegroundBrush" Color="#000000"/>
-            <SolidColorBrush x:Key="MessageBackgroundBrush" Color="#FFFFFF"/>
-            <SolidColorBrush x:Key="MessageBorderBrush" Color="#29748ea2"/>
+            <SolidColorBrush x:Key="MessageBackgroundBrush" Color="Transparent"/>
+            <SolidColorBrush x:Key="MessageBorderBrush" Color="Transparent"/>
             <SolidColorBrush x:Key="MessageSubtleLabelBrush" Color="#a0acb6"/>
             <SolidColorBrush x:Key="MessageSubtleGlyphBrush" Color="#a0acb6"/>
 
@@ -106,8 +106,8 @@
     </ResourceDictionary.ThemeDictionaries>
 
 
-    <x:Double x:Key="MessageMaxWidth">432</x:Double>
-    <Thickness x:Key="MessageContentPadding">8,4,10,6</Thickness>
+    <x:Double x:Key="MessageMaxWidth">10000</x:Double>
+    <Thickness x:Key="MessageContentPadding">0</Thickness>
     <Thickness x:Key="MessageContentMargin">0,2,0,0</Thickness>
     <CornerRadius x:Key="MessageCornerRadius">0</CornerRadius>
 
