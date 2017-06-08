@@ -153,137 +153,6 @@
         </MenuFlyout>
         
         <!-- Round video -->
-
-        <DataTemplate x:Key="UserRoundVideoTemplate" x:DataType="models:TLMessage">
-            <Grid Margin="0,2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <!-- TODO: not the right way -->
-                <Border Height="10" Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"/>
-
-                <StackPanel Visibility="{x:Bind StickerReplyVisibility}"
-                            Background="{ThemeResource MessageServiceBackgroundBrush}"
-                            VerticalAlignment="Top"
-                            HorizontalAlignment="Right"
-                            MaxWidth="180"
-                            Padding="8,0,8,6"
-                            Margin="0,0,4,4"
-                            Grid.Row="1">
-                    <TextBlock Visibility="{x:Bind (Visibility)HasViaBotId}" Margin="0,4,0,0" HorizontalAlignment="Left" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}">
-                        <Hyperlink UnderlineStyle="None" Foreground="#FFFFFF">
-                            <Run Text="via @"/><Run Text="{x:Bind ViaBot.Username}"/>
-                        </Hyperlink>
-                    </TextBlock>
-                    <messages:MessageReference Message="{x:Bind Reply, Mode=OneWay}" Click="Reply_Click" Visibility="{x:Bind ReplyVisibility}" Margin="0,6,0,0">
-                        <messages:MessageReference.Resources>
-                            <SolidColorBrush x:Key="MessageHeaderBorderBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageHeaderForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageSubtleForegroundBrush" Color="#FFFFFF"/>
-                        </messages:MessageReference.Resources>
-                    </messages:MessageReference>
-                </StackPanel>
-
-                <Grid x:Name="MediaControl" ContextFlyout="{StaticResource MessageMenuFlyout}" Grid.Column="1" Grid.Row="1">
-                    <Ellipse Fill="Black"/>
-                    <controls:ImageView
-                        Source="{x:Bind ((models:TLMessageMediaDocument)Media).Document, Converter={StaticResource DefaultPhotoConverter}}"
-                        Constraint="{x:Bind ((models:TLMessageMediaDocument)Media).Document}"
-                        Style="{StaticResource RoundImageViewStyle}"
-                        HorizontalAlignment="Right"
-                        MaxWidth="{StaticResource TelegramLightMediaMaxWidth}"
-                        MaxHeight="{StaticResource TelegramLightMediaMaxHeight}"/>
-
-                    <controls:TransferButton Completed="Download_Click" Transferable="{Binding Media.Document}" IsTransferring="{Binding Media.Document.IsTransferring}" Style="{StaticResource MediaTransferButtonStyle}"/>
-                    <controls:ProgressBarRing Background="Transparent" Foreground="White" Value="{Binding Media.Document.Progress}" IsHitTestVisible="False"/>
-
-                    <StackPanel Orientation="Horizontal" Background="{ThemeResource MessageServiceBackgroundBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Left" Padding="8,4,8,4" Margin="4">
-                        <TextBlock Text="{Binding Media.Document.Duration}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="White" TextAlignment="Right"/>
-                        <Ellipse Visibility="{Binding IsMediaUnread, Converter={StaticResource BooleanToVisibilityConverter}}" Width="6" Height="6" Fill="White" Margin="6,2,0,0"/>
-                    </StackPanel>
-
-                    <messages:MessageStateControl Background="{ThemeResource MessageServiceBackgroundBrush}" Foreground="#FFFFFF" VerticalAlignment="Bottom" HorizontalAlignment="Right" Padding="6,4,6,4" Margin="4"/>
-                </Grid>
-            </Grid>
-        </DataTemplate>
-
-        <DataTemplate x:Key="FriendRoundVideoTemplate" x:DataType="models:TLMessage">
-            <Grid Margin="0,2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <!-- TODO: not the right way -->
-                <Border Height="10" Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"/>
-
-                <Grid x:Name="MediaControl" ContextFlyout="{StaticResource MessageMenuFlyout}" Grid.Row="1">
-                    <Ellipse Fill="Black"/>
-                    <controls:ImageView
-                        Source="{x:Bind ((models:TLMessageMediaDocument)Media).Document, Converter={StaticResource DefaultPhotoConverter}}"
-                        Constraint="{x:Bind ((models:TLMessageMediaDocument)Media).Document}"
-                        Style="{StaticResource RoundImageViewStyle}"
-                        HorizontalAlignment="Left"
-                        MaxWidth="{StaticResource TelegramLightMediaMaxWidth}"
-                        MaxHeight="{StaticResource TelegramLightMediaMaxHeight}"/>
-
-                    <controls:TransferButton Completed="Download_Click" Transferable="{Binding Media.Document}" IsTransferring="{Binding Media.Document.IsTransferring}" Style="{StaticResource MediaTransferButtonStyle}"/>
-                    <controls:ProgressBarRing Background="Transparent" Foreground="White" Value="{Binding Media.Document.Progress}" IsHitTestVisible="False"/>
-
-                    <StackPanel Orientation="Horizontal" Background="{ThemeResource MessageServiceBackgroundBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Left" Padding="8,4,8,4" Margin="4">
-                        <TextBlock Text="{Binding Media.Document.Duration}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="White" TextAlignment="Right"/>
-                        <Ellipse Visibility="{Binding IsMediaUnread, Converter={StaticResource BooleanToVisibilityConverter}}" Width="6" Height="6" Fill="White" Margin="6,2,0,0"/>
-                    </StackPanel>
-
-                    <messages:MessageStateControl Background="{ThemeResource MessageServiceBackgroundBrush}" Foreground="#FFFFFF" VerticalAlignment="Bottom" HorizontalAlignment="Right" Padding="6,4,6,4" Margin="4"/>
-                </Grid>
-
-                <StackPanel Visibility="{x:Bind StickerReplyVisibility}"
-                            Background="{ThemeResource MessageServiceBackgroundBrush}"
-                            VerticalAlignment="Top"
-                            HorizontalAlignment="Left"
-                            MaxWidth="180"
-                            Padding="8,0,8,6"
-                            Margin="4,0,0,4"
-                            Grid.Column="1"
-                            Grid.Row="1">
-                    <TextBlock Visibility="{x:Bind (Visibility)HasViaBotId}" Margin="0,4,0,0" HorizontalAlignment="Left" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}">
-                        <Hyperlink UnderlineStyle="None" Foreground="#FFFFFF">
-                            <Run Text="via @"/><Run Text="{x:Bind ViaBot.Username}"/>
-                        </Hyperlink>
-                    </TextBlock>
-                    <messages:MessageReference Message="{x:Bind Reply, Mode=OneWay}" Click="Reply_Click" Visibility="{x:Bind ReplyVisibility}" Margin="0,6,0,0">
-                        <messages:MessageReference.Resources>
-                            <SolidColorBrush x:Key="MessageHeaderBorderBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageHeaderForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageSubtleForegroundBrush" Color="#FFFFFF"/>
-                        </messages:MessageReference.Resources>
-                    </messages:MessageReference>
-                </StackPanel>
-
-                <Border Visibility="{x:Bind Converter={StaticResource MessageToShareConverter}}"
-                        Background="{ThemeResource MessageServiceBackgroundBrush}"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Bottom"
-                        CornerRadius="14"
-                        Margin="8,0,0,4"
-                        Grid.Column="1"
-                        Grid.Row="1">
-                    <controls:GlyphButton Click="Share_Click" Glyph="&#xEE35;" Foreground="{ThemeResource MessageServiceForegroundBrush}" FontSize="14" Width="28" Height="28" CornerRadius="14"/>
-                </Border>
-            </Grid>
-        </DataTemplate>
-
         <DataTemplate x:Key="ChatFriendRoundVideoTemplate" x:DataType="models:TLMessage">
             <Grid Margin="-52,0,0,0">
                 <Grid.ColumnDefinitions>
@@ -293,11 +162,11 @@
                 <controls:ProfilePictureView x:Phase="3"
                                              x:Name="PhotoBubble"
                                              Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
-                                             Visibility="{x:Bind (Visibility)IsLast, Mode=OneWay}"
+                                             Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
                                              Click="ProfileBubble_Click"
                                              HorizontalAlignment="Left"
-                                             VerticalAlignment="Bottom"
-                                             Margin="12,0,0,2"
+                                             VerticalAlignment="Top"
+                                             Margin="12,8,0,0"
                                              Width="32"
                                              Height="32"/>
 
@@ -372,107 +241,6 @@
             </Grid>
         </DataTemplate>
 
-        <DataTemplate x:Key="UserStickerTemplate" x:DataType="models:TLMessage">
-            <Grid Margin="0,2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <!-- TODO: not the right way -->
-                <Border Height="6" Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"/>
-
-                <StackPanel Visibility="{x:Bind StickerReplyVisibility}"
-                            Background="{ThemeResource MessageServiceBackgroundBrush}"
-                            VerticalAlignment="Top"
-                            HorizontalAlignment="Right"
-                            MaxWidth="180"
-                            Padding="8,0,8,6"
-                            Margin="0,0,4,4"
-                            Grid.Row="1">
-                    <TextBlock Visibility="{x:Bind (Visibility)HasViaBotId}" Margin="0,4,0,0" HorizontalAlignment="Left" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}">
-                        <Hyperlink UnderlineStyle="None" Foreground="#FFFFFF">
-                            <Run Text="via @"/><Run Text="{x:Bind ViaBot.Username}"/>
-                        </Hyperlink>
-                    </TextBlock>
-                    <messages:MessageReference Message="{x:Bind Reply, Mode=OneWay}" Click="Reply_Click" Visibility="{x:Bind ReplyVisibility}" Margin="0,6,0,0">
-                        <messages:MessageReference.Resources>
-                            <SolidColorBrush x:Key="MessageHeaderBorderBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageHeaderForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageSubtleForegroundBrush" Color="#FFFFFF"/>
-                        </messages:MessageReference.Resources>
-                    </messages:MessageReference>
-                </StackPanel>
-
-                <Grid ContextFlyout="{StaticResource StickerMenuFlyout}" Grid.Column="1" Grid.Row="1">
-                    <controls:StickerView
-                        Source="{x:Bind ((models:TLMessageMediaDocument)Media).Document, Converter={StaticResource DefaultPhotoConverter}}"
-                        Constraint="{x:Bind ((models:TLMessageMediaDocument)Media).Document}"
-                        Click="StickerSet_Click"
-                        HorizontalAlignment="Right"
-                        MaxWidth="{StaticResource TelegramLightMediaMaxWidth}"
-                        MaxHeight="{StaticResource TelegramLightMediaMaxHeight}"/>
-
-                    <messages:MessageStateControl Background="{ThemeResource MessageServiceBackgroundBrush}" Foreground="#FFFFFF" VerticalAlignment="Bottom" HorizontalAlignment="Right" Padding="6,4,6,4" Margin="4"/>
-                </Grid>
-            </Grid>
-        </DataTemplate>
-
-        <DataTemplate x:Key="FriendStickerTemplate" x:DataType="models:TLMessage">
-            <Grid Margin="0,2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <!-- TODO: not the right way -->
-                <Border Height="6" Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"/>
-
-                <Grid ContextFlyout="{StaticResource StickerMenuFlyout}" Grid.Row="1">
-                    <controls:StickerView
-                        Source="{x:Bind ((models:TLMessageMediaDocument)Media).Document, Converter={StaticResource DefaultPhotoConverter}}"
-                        Constraint="{x:Bind ((models:TLMessageMediaDocument)Media).Document}"
-                        Click="StickerSet_Click"
-                        HorizontalAlignment="Left"
-                        MaxWidth="{StaticResource TelegramLightMediaMaxWidth}"
-                        MaxHeight="{StaticResource TelegramLightMediaMaxHeight}"/>
-
-                    <messages:MessageStateControl Background="{ThemeResource MessageServiceBackgroundBrush}" Foreground="#FFFFFF" VerticalAlignment="Bottom" HorizontalAlignment="Right" Padding="6,4,6,4" Margin="4"/>
-                </Grid>
-
-                <StackPanel Visibility="{x:Bind StickerReplyVisibility}"
-                            Background="{ThemeResource MessageServiceBackgroundBrush}"
-                            VerticalAlignment="Top"
-                            HorizontalAlignment="Left"
-                            MaxWidth="180"
-                            Padding="8,0,8,6"
-                            Margin="4,0,0,4"
-                            Grid.Column="1"
-                            Grid.Row="1">
-                    <TextBlock Visibility="{x:Bind (Visibility)HasViaBotId}" Margin="0,4,0,0" HorizontalAlignment="Left" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}">
-                        <Hyperlink UnderlineStyle="None" Foreground="#FFFFFF">
-                            <Run Text="via @"/><Run Text="{x:Bind ViaBot.Username}"/>
-                        </Hyperlink>
-                    </TextBlock>
-                    <messages:MessageReference Message="{x:Bind Reply, Mode=OneWay}" Click="Reply_Click" Visibility="{x:Bind ReplyVisibility}" Margin="0,6,0,0">
-                        <messages:MessageReference.Resources>
-                            <SolidColorBrush x:Key="MessageHeaderBorderBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageHeaderForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageForegroundBrush" Color="#FFFFFF"/>
-                            <SolidColorBrush x:Key="MessageSubtleForegroundBrush" Color="#FFFFFF"/>
-                        </messages:MessageReference.Resources>
-                    </messages:MessageReference>
-                </StackPanel>
-            </Grid>
-        </DataTemplate>
-
         <DataTemplate x:Key="ChatFriendStickerTemplate" x:DataType="models:TLMessage">
             <Grid Margin="-52,0,0,0">
                 <Grid.ColumnDefinitions>
@@ -482,11 +250,11 @@
                 <controls:ProfilePictureView x:Phase="3"
                                              x:Name="PhotoBubble"
                                              Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
-                                             Visibility="{x:Bind (Visibility)IsLast, Mode=OneWay}"
+                                             Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
                                              Click="ProfileBubble_Click"
                                              HorizontalAlignment="Left"
-                                             VerticalAlignment="Bottom"
-                                             Margin="12,0,0,2"
+                                             VerticalAlignment="Top"
+                                             Margin="12,8,0,0"
                                              Width="32"
                                              Height="32"/>
 
@@ -572,37 +340,6 @@
         </DataTemplate>
         <!-- EndRegion -->
 
-        <DataTemplate x:Key="UserMessageTemplate">
-            <messages:MessageBubble ContextFlyout="{StaticResource MessageMenuFlyout}">
-                <FrameworkElement.Resources>
-                    <ResourceDictionary>
-                        <ResourceDictionary.MergedDictionaries>
-                            <ResourceDictionary Source="ms-appx:///Themes/AccentSent.xaml"/>
-                        </ResourceDictionary.MergedDictionaries>
-                    </ResourceDictionary>
-                </FrameworkElement.Resources>
-            </messages:MessageBubble>
-        </DataTemplate>
-
-        <DataTemplate x:Key="FriendMessageTemplate" x:DataType="models:TLMessage">
-            <Grid HorizontalAlignment="{ThemeResource MessageHorizontalAlignment}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <messages:MessageBubble ContextFlyout="{StaticResource MessageMenuFlyout}"/>
-
-                <Border Visibility="{x:Bind Converter={StaticResource MessageToShareConverter}}"
-                        Background="{ThemeResource MessageServiceBackgroundBrush}"
-                        VerticalAlignment="Bottom"
-                        CornerRadius="14"
-                        Margin="8,0,0,4"
-                        Grid.Column="1">
-                    <controls:GlyphButton Click="Share_Click" Glyph="&#xEE35;" Foreground="{ThemeResource MessageServiceForegroundBrush}" FontSize="14" Width="28" Height="28" CornerRadius="14"/>
-                </Border>
-            </Grid>
-        </DataTemplate>
-
         <DataTemplate x:Key="ChatFriendMessageTemplate" x:DataType="models:TLMessage">
             <Grid Margin="-52,0,0,0" HorizontalAlignment="{ThemeResource MessageHorizontalAlignment}">
                 <Grid.ColumnDefinitions>
@@ -613,11 +350,11 @@
                 <controls:ProfilePictureView x:Phase="3"
                                              x:Name="PhotoBubble"
                                              Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
-                                             Visibility="{x:Bind (Visibility)IsLast, Mode=OneWay}"
+                                             Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
                                              Click="ProfileBubble_Click"
                                              HorizontalAlignment="Left"
-                                             VerticalAlignment="Bottom"
-                                             Margin="12,0,0,2"
+                                             VerticalAlignment="Top"
+                                             Margin="12,8,0,0"
                                              Width="32"
                                              Height="32"/>
                 <messages:MessageBubble ContextFlyout="{StaticResource MessageMenuFlyout}" Grid.Column="1"/>
@@ -633,37 +370,41 @@
             </Grid>
         </DataTemplate>
 
-        <DataTemplate x:Key="ServiceUserCallMessageTemplate">
-            <messages:PhoneCallMessageBubble ContextFlyout="{StaticResource ServiceMenuFlyout}">
-                <StackPanel.Resources>
-                    <ResourceDictionary>
-                        <ResourceDictionary.MergedDictionaries>
-                            <ResourceDictionary Source="ms-appx:///Themes/AccentSent.xaml"/>
-                        </ResourceDictionary.MergedDictionaries>
-                    </ResourceDictionary>
-                </StackPanel.Resources>
-            </messages:PhoneCallMessageBubble>
-        </DataTemplate>
-
-        <DataTemplate x:Key="ServiceFriendCallMessageTemplate">
-            <messages:PhoneCallMessageBubble ContextFlyout="{StaticResource ServiceMenuFlyout}"/>
+        <DataTemplate x:Key="ServiceChatFriendCallMessageTemplate" x:DataType="models:TLMessage">
+            <Grid Margin="-52,0,0,0" HorizontalAlignment="{ThemeResource MessageHorizontalAlignment}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="52"/>
+                    <ColumnDefinition/>
+                </Grid.ColumnDefinitions>
+                <controls:ProfilePictureView x:Phase="3"
+                                             x:Name="PhotoBubble"
+                                             Source="{x:Bind From.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}"
+                                             Visibility="{x:Bind (Visibility)IsFirst, Mode=OneWay}"
+                                             Click="ProfileBubble_Click"
+                                             HorizontalAlignment="Left"
+                                             VerticalAlignment="Top"
+                                             Margin="12,8,0,0"
+                                             Width="32"
+                                             Height="32"/>
+                <messages:PhoneCallMessageBubble ContextFlyout="{StaticResource ServiceMenuFlyout}" Grid.Column="1"/>
+            </Grid>
         </DataTemplate>
 
         <selectors:MessageTemplateSelector x:Key="MessageTemplateSelector"
-                                           UserMessageTemplate="{StaticResource UserMessageTemplate}"
-                                           UserStickerTemplate="{StaticResource UserStickerTemplate}"
-                                           UserRoundVideoTemplate="{StaticResource UserRoundVideoTemplate}"
-                                           FriendMessageTemplate="{StaticResource FriendMessageTemplate}"
-                                           FriendStickerTemplate="{StaticResource FriendStickerTemplate}"
-                                           FriendRoundVideoTemplate="{StaticResource FriendRoundVideoTemplate}"
+                                           UserMessageTemplate="{StaticResource ChatFriendMessageTemplate}"
+                                           UserStickerTemplate="{StaticResource ChatFriendStickerTemplate}"
+                                           UserRoundVideoTemplate="{StaticResource ChatFriendRoundVideoTemplate}"
+                                           FriendMessageTemplate="{StaticResource ChatFriendMessageTemplate}"
+                                           FriendStickerTemplate="{StaticResource ChatFriendStickerTemplate}"
+                                           FriendRoundVideoTemplate="{StaticResource ChatFriendRoundVideoTemplate}"
                                            ChatFriendMessageTemplate="{StaticResource ChatFriendMessageTemplate}"
                                            ChatFriendStickerTemplate="{StaticResource ChatFriendStickerTemplate}"
                                            ChatFriendRoundVideoTemplate="{StaticResource ChatFriendRoundVideoTemplate}"
                                            ServiceMessageTemplate="{StaticResource ServiceMessageTemplate}"
                                            ServiceMessagePhotoTemplate="{StaticResource ServiceMessagePhotoTemplate}"
                                            ServiceMessageLocalTemplate="{StaticResource ServiceMessageLocalTemplate}"
-                                           ServiceUserCallTemplate="{StaticResource ServiceUserCallMessageTemplate}"
-                                           ServiceFriendCallTemplate="{StaticResource ServiceFriendCallMessageTemplate}"/>
+                                           ServiceUserCallTemplate="{StaticResource ServiceChatFriendCallMessageTemplate}"
+                                           ServiceFriendCallTemplate="{StaticResource ServiceChatFriendCallMessageTemplate}"/>
 
         <Style x:Key="UploadProgressRingStyle" TargetType="ProgressRing">
             <Setter Property="Background" Value="Transparent" />
