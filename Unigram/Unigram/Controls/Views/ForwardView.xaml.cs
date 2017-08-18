@@ -210,6 +210,11 @@ namespace Unigram.Controls.Views
             var backgroundBrush = Application.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
 
+            if (backgroundBrush == null)
+            {
+                backgroundBrush = new SolidColorBrush(Colors.Transparent);
+            }
+
             titlebar.BackgroundColor = backgroundBrush.Color;
             titlebar.ForegroundColor = foregroundBrush.Color;
             titlebar.ButtonBackgroundColor = backgroundBrush.Color;

@@ -9,6 +9,7 @@ using Unigram.Core.Helpers;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.Foundation.Metadata;
+using Windows.UI;
 using Windows.UI.ViewManagement;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -64,6 +65,11 @@ namespace Unigram.Controls
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
             var overlayBrush = Application.Current.Resources["SystemControlBackgroundAltMediumBrush"] as SolidColorBrush;
 
+            if (backgroundBrush == null)
+            {
+                backgroundBrush = new SolidColorBrush(Colors.Transparent);
+            }
+
             if (overlayBrush != null)
             {
                 var maskBackground = ColorsHelper.AlphaBlend(backgroundBrush.Color, overlayBrush.Color);
@@ -88,6 +94,11 @@ namespace Unigram.Controls
             var titlebar = ApplicationView.GetForCurrentView().TitleBar;
             var backgroundBrush = Application.Current.Resources["TelegramBackgroundTitlebarBrush"] as SolidColorBrush;
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
+
+            if (backgroundBrush == null)
+            {
+                backgroundBrush = new SolidColorBrush(Colors.Transparent);
+            }
 
             titlebar.BackgroundColor = backgroundBrush.Color;
             titlebar.ForegroundColor = foregroundBrush.Color;

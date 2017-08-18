@@ -7,6 +7,7 @@
     xmlns:common="using:Unigram.Common"
     xmlns:views="using:Unigram.Views"
     xmlns:converters="using:Unigram.Converters"
+    xmlns:fluent="using:Microsoft.UI.Xaml.Controls"
     xmlns:local="using:Unigram">
 
     <Application.Resources>
@@ -133,8 +134,9 @@
                 <!--<TextBlock Text="{Binding Media.WebPage.SiteName}" MaxLines="1" TextTrimming="CharacterEllipsis" Visibility="{Binding Media.WebPage.SiteNameVisibility}" Foreground="{ThemeResource MessageHeaderForegroundBrush}" Style="{StaticResource BaseTextBlockStyle}"/>-->
                 <Setter Property="MaxLines" Value="1"/>
             </Style>
-            
+
             <ResourceDictionary.MergedDictionaries>
+                <fluent:DEPControlsThemeResources/>
                 <ResourceDictionary Source="ms-appx:///Common/CommonStyles.xaml" />
                 <!--<ResourceDictionary Source="ms-appx:///Themes/Brand.xaml"/>-->
                 <ResourceDictionary Source="ms-appx:///Themes/Accent.xaml"/>

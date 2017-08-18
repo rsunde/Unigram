@@ -73,6 +73,57 @@ namespace Unigram.Views
             searchInit();
 
             InputPane.GetForCurrentView().Showing += (s, args) => args.EnsuredFocusedElementInView = true;
+
+
+
+
+
+
+
+
+            if (Windows.ApplicationModel.DesignMode.DesignModeEnabled)
+            {
+                return;
+            }
+
+            if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.StatusBar"))
+            {
+                var statusBar = StatusBar.GetForCurrentView();
+                statusBar.BackgroundColor = Colors.Transparent;
+                statusBar.BackgroundOpacity = 0;
+
+                Margin = new Thickness(0, -statusBar.OccludedRect.Height, 0, 0);
+                TitleBar.Height = statusBar.OccludedRect.Height;
+                //Padding = new Thickness(0, statusBar.OccludedRect.Height, 0, 0);
+            }
+            else
+            {
+                var titleBar = ApplicationView.GetForCurrentView().TitleBar;
+                //titleBar.ButtonForegroundColor = ((SolidColorBrush)Foreground).Color;
+                titleBar.ButtonBackgroundColor = Colors.Transparent;
+                titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+
+                var coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
+                coreTitleBar.IsVisibleChanged += TitleBar_IsVisibleChanged;
+                coreTitleBar.LayoutMetricsChanged += TitleBar_LayoutMetricsChanged;
+                coreTitleBar.ExtendViewIntoTitleBar = true;
+
+                Margin = new Thickness();
+                TitleBar.Height = coreTitleBar.Height;
+                //Padding = new Thickness(0, statusBar.OccludedRect.Height, 0, 0);
+            }
+        }
+
+        private void TitleBar_IsVisibleChanged(CoreApplicationViewTitleBar sender, object args)
+        {
+            Margin = new Thickness();
+            TitleBar.Height = sender.Height;
+        }
+
+        private void TitleBar_LayoutMetricsChanged(CoreApplicationViewTitleBar sender, object args)
+        {
+            Margin = new Thickness();
+            TitleBar.Height = sender.Height;
         }
 
         public void OnBackRequested(HandledEventArgs args)
@@ -798,16 +849,39 @@ namespace Unigram.Views
             MasterDetail.NavigationService.Navigate(typeof(CreateChatStep1Page));
         }
 
+        private void NewChat_Invoked(Microsoft.UI.Xaml.Controls.NavigationMenuItem sender, object args)
+        {
+            MasterDetail.NavigationService.Navigate(typeof(CreateChatStep1Page));
+        }
+
         private void NewChannel_Click(object sender, RoutedEventArgs e)
+        {
+            MasterDetail.NavigationService.Navigate(typeof(CreateChannelStep1Page));
+        }
+
+        private void NewChannel_Invoked(Microsoft.UI.Xaml.Controls.NavigationMenuItem sender, object args)
         {
             MasterDetail.NavigationService.Navigate(typeof(CreateChannelStep1Page));
         }
 
         private void Pivot_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            NewChatItem.Visibility = NewChannelItem.Visibility = rpMasterTitlebar.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-            EditNameItem.Visibility = LogoutItem.Visibility = rpMasterTitlebar.SelectedIndex == 3 ? Visibility.Visible : Visibility.Collapsed;
-            FlyoutSeperator.Visibility = (rpMasterTitlebar.SelectedIndex == 1 || rpMasterTitlebar.SelectedIndex == 2) ? Visibility.Collapsed : Visibility.Visible;
+            //NewChatItem.Visibility = NewChannelItem.Visibility = rpMasterTitlebar.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            //EditNameItem.Visibility = LogoutItem.Visibility = rpMasterTitlebar.SelectedIndex == 3 ? Visibility.Visible : Visibility.Collapsed;
+            //FlyoutSeperator.Visibility = (rpMasterTitlebar.SelectedIndex == 1 || rpMasterTitlebar.SelectedIndex == 2) ? Visibility.Collapsed : Visibility.Visible;
+
+            NavigationChats.IsSelected = rpMasterTitlebar.SelectedIndex == 0;
+            NavigationContacts.IsSelected = rpMasterTitlebar.SelectedIndex == 1;
+            NavigationCalls.IsSelected = rpMasterTitlebar.SelectedIndex == 2;
+            NavigationSettings.IsSelected = rpMasterTitlebar.SelectedIndex == 3;
+        }
+
+        private void Navigate_Invoked(Microsoft.UI.Xaml.Controls.NavigationMenuItem sender, object args)
+        {
+            rpMasterTitlebar.SelectedIndex = sender.Equals(NavigationChats)
+                ? 0 : sender.Equals(NavigationContacts)
+                ? 1 : sender.Equals(NavigationCalls)
+                ? 2 : 3;
         }
     }
 }

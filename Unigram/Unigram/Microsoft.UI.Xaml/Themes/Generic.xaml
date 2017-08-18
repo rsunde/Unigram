@@ -1,0 +1,105 @@
+﻿<ResourceDictionary xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+    
+    <Style TargetType="controls:NavigationView">
+        <Setter Property="PaneToggleButtonStyle" Value="{StaticResource PaneToggleButtonStyle}" />
+        <Setter Property="HeaderTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <TextBlock x:Name="Header" Margin="12,5,0,11" VerticalAlignment="Top" Style="{StaticResource TitleTextBlockStyle}" TextWrapping="NoWrap">
+                        <TextBlock.Text>
+                            <Binding />
+                        </TextBlock.Text>
+                    </TextBlock>
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:NavigationView">
+                    <Grid x:Name="RootGrid">
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup>
+                                <VisualState x:Name="Compact" />
+                                <VisualState x:Name="Expanded">
+                                    <VisualState.Setters>
+                                        <Setter Target="RootSplitView.PaneBackground" Value="{ThemeResource NavigationViewExpandedPaneBackground}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Minimal">
+                                    <!--<VisualState.Setters>
+                                        <Setter Target="HeaderContent.Margin" Value="48,0,0,0" />
+                                    </VisualState.Setters>-->
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup>
+                                <VisualState x:Name="TogglePaneButtonVisible" />
+                                <VisualState x:Name="TogglePaneButtonCollapsed">
+                                    <VisualState.Setters>
+                                        <Setter Target="PaneContentGridToggleButtonRow.Height" Value="4" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Grid Width="{StaticResource PaneToggleButtonSize}"
+                              Height="{StaticResource PaneToggleButtonSize}"
+                              Margin="0,0,0,8"
+                              HorizontalAlignment="Left"
+                              VerticalAlignment="Top"
+                              Canvas.ZIndex="100">
+                            <Button x:Name="TogglePaneButton" TabIndex="1" Style="{TemplateBinding PaneToggleButtonStyle}"/>
+                        </Grid>
+                        <SplitView x:Name="RootSplitView" Background="{TemplateBinding Background}" DisplayMode="Inline" IsTabStop="False" PaneBackground="{ThemeResource NavigationViewDefaultPaneBackground}" CompactPaneLength="{TemplateBinding CompactPaneLength}" IsPaneOpen="{TemplateBinding IsPaneOpen}" OpenPaneLength="{TemplateBinding OpenPaneLength}">
+                            <SplitView.Pane>
+                                <Grid x:Name="PaneContentGrid">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition x:Name="PaneContentGridToggleButtonRow" Height="56" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="8" />
+                                    </Grid.RowDefinitions>
+                                    <ListView x:Name="MenuItemsHost" Grid.Row="1" Margin="0,0,0,20" SelectionMode="None">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem">
+                                                <Setter Property="IsTabStop" Value="False" />
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Setter Property="MinHeight" Value="0" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                    </ListView>
+                                    <Border x:Name="FooterContentBorder" Grid.Row="2" Child="{TemplateBinding PaneFooter}"/>
+                                    <controls:NavigationMenuItem x:Name="SettingsNavPaneItem" Grid.Row="3" Icon="Setting" />
+                                </Grid>
+                            </SplitView.Pane>
+                            <Grid x:Name="ContentGrid">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <ContentControl x:Name="HeaderContent" Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}" VerticalContentAlignment="Stretch" HorizontalContentAlignment="Stretch" />
+                                <Border x:Name="ContentBorder" Grid.Row="1" Child="{TemplateBinding Content}" />
+                            </Grid>
+                        </SplitView>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    
+    <Style TargetType="controls:NavigationMenuItemSeparator">
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:NavigationMenuItemSeparator">
+                    <Grid Height="20" AutomationProperties.AccessibilityView="Raw" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

@@ -484,11 +484,16 @@ namespace Unigram
                 buttonPressed = Color.FromArgb(255, 184, 184, 184);
             }
 
+            background = Colors.Transparent;
+
             // Desktop Title Bar
             try
             {
                 var titleBar = ApplicationView.GetForCurrentView().TitleBar;
-                CoreApplication.GetCurrentView().TitleBar.ExtendViewIntoTitleBar = false;
+                var coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
+
+                // Extend
+                coreTitleBar.ExtendViewIntoTitleBar = true;
 
                 // Background
                 titleBar.BackgroundColor = background;

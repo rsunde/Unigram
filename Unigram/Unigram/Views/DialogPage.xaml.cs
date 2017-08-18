@@ -1387,6 +1387,11 @@ namespace Unigram.Views
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
             var overlayBrush = new SolidColorBrush(Color.FromArgb(0x99, 0x00, 0x00, 0x00));
 
+            if (backgroundBrush == null)
+            {
+                backgroundBrush = new SolidColorBrush(Colors.Transparent);
+            }
+
             if (overlayBrush != null)
             {
                 var maskBackground = ColorsHelper.AlphaBlend(backgroundBrush.Color, overlayBrush.Color);
@@ -1411,6 +1416,11 @@ namespace Unigram.Views
             var titlebar = ApplicationView.GetForCurrentView().TitleBar;
             var backgroundBrush = Application.Current.Resources["TelegramBackgroundTitlebarBrush"] as SolidColorBrush;
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
+
+            if (backgroundBrush == null)
+            {
+                backgroundBrush = new SolidColorBrush(Colors.Transparent);
+            }
 
             titlebar.BackgroundColor = backgroundBrush.Color;
             titlebar.ForegroundColor = foregroundBrush.Color;
