@@ -437,26 +437,30 @@
                         </Grid>
                     </DataTemplate>
                 </fluent:NavigationView.HeaderTemplate>
-                <fluent:NavigationView.MenuItems>
-                    <fluent:NavigationMenuItem Invoked="NewChat_Invoked" Text="New Group">
-                        <fluent:NavigationMenuItem.Icon>
-                            <FontIcon Glyph="&#xE125;"/>
-                        </fluent:NavigationMenuItem.Icon>
-                    </fluent:NavigationMenuItem>
-                    <!--<fluent:NavigationMenuItem Text="New Secret Chat">
+                <fluent:NavigationView.Tag>
+                    <StackPanel>
+                        <fluent:NavigationMenuItem Invoked="NewChat_Invoked" Text="New Group">
+                            <fluent:NavigationMenuItem.Icon>
+                                <FontIcon Glyph="&#xE125;"/>
+                            </fluent:NavigationMenuItem.Icon>
+                        </fluent:NavigationMenuItem>
+                        <!--<fluent:NavigationMenuItem Text="New Secret Chat">
                          <fluent:NavigationMenuItem.Icon>
                          <FontIcon Glyph="&#xE125;"/>
                          </fluent:NavigationMenuItem.Icon>
                          </fluent:NavigationMenuItem>-->
-                    <fluent:NavigationMenuItem Invoked="NewChannel_Invoked" Text="New Channel">
-                        <fluent:NavigationMenuItem.Icon>
-                            <FontIcon Glyph="&#xE789;"/>
-                        </fluent:NavigationMenuItem.Icon>
-                    </fluent:NavigationMenuItem>
-                    <fluent:NavigationMenuItemSeparator/>
+                        <fluent:NavigationMenuItem Invoked="NewChannel_Invoked" Text="New Channel">
+                            <fluent:NavigationMenuItem.Icon>
+                                <FontIcon Glyph="&#xE789;"/>
+                            </fluent:NavigationMenuItem.Icon>
+                        </fluent:NavigationMenuItem>
+                        <fluent:NavigationMenuItemSeparator/>
+                    </StackPanel>
+                </fluent:NavigationView.Tag>
+                <fluent:NavigationView.MenuItems>
                     <fluent:NavigationMenuItem x:Name="NavigationChats" Invoked="Navigate_Invoked" Text="Chats" IsSelected="True">
                         <fluent:NavigationMenuItem.Icon>
-                            <FontIcon Glyph="&#xE928;"/>
+                            <FontIcon Glyph="&#xE8BD;"/>
                         </fluent:NavigationMenuItem.Icon>
                     </fluent:NavigationMenuItem>
                     <fluent:NavigationMenuItem x:Name="NavigationContacts" Invoked="Navigate_Invoked" Text="Contacts">
@@ -485,6 +489,13 @@
                          </fluent:NavigationMenuItem.Icon>
                          </fluent:NavigationMenuItem>-->
                 </fluent:NavigationView.MenuItems>
+                <fluent:NavigationView.PaneFooter>
+                    <fluent:NavigationMenuItem Invoked="Self_Invoked" Text="{x:Bind ViewModel.Contacts.Self.FullName, Mode=OneWay}" Tag="{x:Bind ViewModel.Contacts.Self.PhotoSelf, Mode=OneWay, Converter={StaticResource DefaultPhotoConverter}}" Style="{StaticResource ImageNavigationMenuItemStyle}">
+                        <fluent:NavigationMenuItem.Icon>
+                            <FontIcon Glyph="&#xE115;"/>
+                        </fluent:NavigationMenuItem.Icon>
+                    </fluent:NavigationMenuItem>
+                </fluent:NavigationView.PaneFooter>
                 <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>

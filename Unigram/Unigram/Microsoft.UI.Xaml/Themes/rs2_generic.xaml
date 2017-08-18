@@ -1,7 +1,8 @@
 ﻿<ResourceDictionary xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="using:Unigram.Controls"
                     xmlns:controls="using:Microsoft.UI.Xaml.Controls"
                     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
-    
+
     <Style TargetType="controls:NavigationView">
         <Setter Property="PaneToggleButtonStyle" Value="{StaticResource PaneToggleButtonStyle}" />
         <Setter Property="HeaderTemplate">
@@ -60,7 +61,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="8" />
                                     </Grid.RowDefinitions>
-                                    <ListView x:Name="MenuItemsHost" Grid.Row="1" Margin="0,0,0,20" SelectionMode="None">
+                                    <ListView x:Name="MenuItemsHost" Grid.Row="1" Margin="0,0,0,20" SelectionMode="None" Header="{TemplateBinding Tag}">
                                         <ListView.ItemContainerStyle>
                                             <Style TargetType="ListViewItem">
                                                 <Setter Property="IsTabStop" Value="False" />

@@ -651,6 +651,14 @@ namespace Unigram.Views
             }
         }
 
+        private void Self_Invoked(Microsoft.UI.Xaml.Controls.NavigationMenuItem sender, object args)
+        {
+            if (ViewModel.Contacts.Self != null)
+            {
+                MasterDetail.NavigationService.NavigateToDialog(ViewModel.Contacts.Self);
+            }
+        }
+
         private async void cbtnMasterSettings_Click(object sender, RoutedEventArgs e)
         {
             Frame.Navigate(typeof(SettingsPage));
