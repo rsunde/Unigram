@@ -128,7 +128,12 @@ namespace Unigram.Views
 
         public void OnBackRequested(HandledEventArgs args)
         {
-            if (MasterDetail.CurrentState == MasterDetailState.Narrow && rpMasterTitlebar.SelectedIndex != 0)
+            if (Navigation.IsPaneOpen)
+            {
+                Navigation.IsPaneOpen = false;
+                args.Handled = true;
+            }
+            else if (MasterDetail.CurrentState == MasterDetailState.Narrow && rpMasterTitlebar.SelectedIndex != 0)
             {
                 rpMasterTitlebar.SelectedIndex = 0;
                 args.Handled = true;
