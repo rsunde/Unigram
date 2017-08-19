@@ -92,7 +92,7 @@
         </Style>
     </Page.Resources>
 
-    <Grid>
+    <Grid x:Name="LayoutRoot">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition/>
@@ -100,19 +100,40 @@
         <Border x:Name="TitleBar" Background="{ThemeResource TelegramBackgroundTitlebarBrush}"/>
         <controls:MasterDetailView x:Name="MasterDetail" ViewStateChanged="OnStateChanged" Grid.Row="1">
             <fluent:NavigationView x:Name="Navigation"
-                                   Header="{x:Bind rpMasterTitlebar.SelectedItem.(PivotItem.Header), Mode=OneWay}"
+                                   HeaderTemplate="{x:Null}"
                                    OpenPaneLength="240"
                                    IsSettingsVisible="False"
                                    CompactModeThresholdWidth="Infinity"
                                    ExpandedModeThresholdWidth="Infinity">
-                <fluent:NavigationView.HeaderTemplate>
-                    <DataTemplate x:DataType="x:String">
-                        <Grid>
-                            <controls:PageHeader/>
-                            <TextBlock Text="{x:Bind}" VerticalAlignment="Center" Margin="60,0,0,0" Style="{StaticResource BaseTextBlockStyle}"/>
-                        </Grid>
-                    </DataTemplate>
-                </fluent:NavigationView.HeaderTemplate>
+                <fluent:NavigationView.Header>
+                    <Grid>
+                        <controls:PageHeader/>
+                        <TextBlock x:Name="DefaultHeader" Text="{x:Bind rpMasterTitlebar.SelectedItem.(PivotItem.Header), Mode=OneWay}" VerticalAlignment="Center" Margin="60,0,0,0" Style="{StaticResource BaseTextBlockStyle}"/>
+
+                        <controls:SearchTextBox x:Name="SearchDialogs"
+                                                Padding="60,3,6,5"
+                                                Background="{x:Null}"
+                                                BorderBrush="{x:Null}"
+                                                Style="{StaticResource SearchTextBoxStyle}"
+                                                Text="{Binding Dialogs.SearchQuery, Mode=TwoWay}"
+                                                PreventKeyboardDisplayOnProgrammaticFocus="True"
+                                                PlaceholderText="Search for chats and messages"
+                                                TextChanged="txtSearch_TextChanged"
+                                                KeyDown="txtSearch_KeyDown"
+                                                Canvas.ZIndex="1"/>
+                        <controls:SearchTextBox x:Name="SearchContacts"
+                                                Padding="60,3,6,5"
+                                                Background="{x:Null}"
+                                                BorderBrush="{x:Null}"
+                                                Style="{StaticResource SearchTextBoxStyle}"
+                                                Text="{Binding Dialogs.SearchQuery, Mode=TwoWay}"
+                                                PreventKeyboardDisplayOnProgrammaticFocus="True"
+                                                PlaceholderText="Search for contacts and usernames"
+                                                TextChanged="txtSearch_TextChanged"
+                                                KeyDown="txtSearch_KeyDown"
+                                                Canvas.ZIndex="1"/>
+                    </Grid>
+                </fluent:NavigationView.Header>
                 <fluent:NavigationView.Tag>
                     <StackPanel>
                         <fluent:NavigationMenuItem Invoked="NewChat_Invoked" Text="New Group">
@@ -121,10 +142,10 @@
                             </fluent:NavigationMenuItem.Icon>
                         </fluent:NavigationMenuItem>
                         <!--<fluent:NavigationMenuItem Text="New Secret Chat">
-                         <fluent:NavigationMenuItem.Icon>
-                         <FontIcon Glyph="&#xE125;"/>
-                         </fluent:NavigationMenuItem.Icon>
-                         </fluent:NavigationMenuItem>-->
+                             <fluent:NavigationMenuItem.Icon>
+                             <FontIcon Glyph="&#xE125;"/>
+                             </fluent:NavigationMenuItem.Icon>
+                             </fluent:NavigationMenuItem>-->
                         <fluent:NavigationMenuItem Invoked="NewChannel_Invoked" Text="New Channel">
                             <fluent:NavigationMenuItem.Icon>
                                 <FontIcon Glyph="&#xE789;"/>
@@ -177,21 +198,21 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition/>
                     </Grid.RowDefinitions>
-                    <Pivot x:Name="rpMasterTitlebar" Style="{StaticResource HeaderlessPivotStyle}" SelectionChanged="Pivot_SelectionChanged" Grid.RowSpan="2">
+                    <Pivot x:Name="rpMasterTitlebar" IsLocked="True" Style="{StaticResource HeaderlessPivotStyle}" SelectionChanged="Pivot_SelectionChanged" Grid.RowSpan="2">
                         <PivotItem Header="Chats">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition/>
                                 </Grid.RowDefinitions>
-                                <controls:SearchTextBox x:Name="SearchDialogs"
-                                                        Style="{StaticResource SearchTextBoxStyle}"
-                                                        Text="{Binding Dialogs.SearchQuery, Mode=TwoWay}"
-                                                        PreventKeyboardDisplayOnProgrammaticFocus="True"
-                                                        PlaceholderText="Search chats and messages"
-                                                        TextChanged="txtSearch_TextChanged"
-                                                        KeyDown="txtSearch_KeyDown"
-                                                        Canvas.ZIndex="1"/>
+                                <!--<controls:SearchTextBox x:Name="SearchDialogs"
+                                     Style="{StaticResource SearchTextBoxStyle}"
+                                     Text="{Binding Dialogs.SearchQuery, Mode=TwoWay}"
+                                     PreventKeyboardDisplayOnProgrammaticFocus="True"
+                                     PlaceholderText="Search chats and messages"
+                                     TextChanged="txtSearch_TextChanged"
+                                     KeyDown="txtSearch_KeyDown"
+                                     Canvas.ZIndex="1"/>-->
                                 <Grid Canvas.ZIndex="-1" Grid.Row="1">
                                     <controls:ScrollViewerBackground
                                         Visibility="{x:Bind (Visibility)ViewModel.Dialogs.IsFirstPinned, Mode=OneWay}"

@@ -92,7 +92,7 @@ namespace Unigram.Views
                 statusBar.BackgroundColor = Colors.Transparent;
                 statusBar.BackgroundOpacity = 0;
 
-                Margin = new Thickness(0, -statusBar.OccludedRect.Height, 0, 0);
+                LayoutRoot.Margin = new Thickness(0, -statusBar.OccludedRect.Height, 0, 0);
                 TitleBar.Height = statusBar.OccludedRect.Height;
                 //Padding = new Thickness(0, statusBar.OccludedRect.Height, 0, 0);
             }
@@ -108,7 +108,7 @@ namespace Unigram.Views
                 coreTitleBar.LayoutMetricsChanged += TitleBar_LayoutMetricsChanged;
                 coreTitleBar.ExtendViewIntoTitleBar = true;
 
-                Margin = new Thickness();
+                LayoutRoot.Margin = new Thickness();
                 TitleBar.Height = coreTitleBar.Height;
                 //Padding = new Thickness(0, statusBar.OccludedRect.Height, 0, 0);
             }
@@ -116,13 +116,13 @@ namespace Unigram.Views
 
         private void TitleBar_IsVisibleChanged(CoreApplicationViewTitleBar sender, object args)
         {
-            Margin = new Thickness();
+            LayoutRoot.Margin = new Thickness();
             TitleBar.Height = sender.Height;
         }
 
         private void TitleBar_LayoutMetricsChanged(CoreApplicationViewTitleBar sender, object args)
         {
-            Margin = new Thickness();
+            LayoutRoot.Margin = new Thickness();
             TitleBar.Height = sender.Height;
         }
 
@@ -887,6 +887,10 @@ namespace Unigram.Views
             NavigationContacts.IsSelected = rpMasterTitlebar.SelectedIndex == 1;
             NavigationCalls.IsSelected = rpMasterTitlebar.SelectedIndex == 2;
             NavigationSettings.IsSelected = rpMasterTitlebar.SelectedIndex == 3;
+
+            SearchDialogs.Visibility = rpMasterTitlebar.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            SearchContacts.Visibility = rpMasterTitlebar.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            DefaultHeader.Visibility = rpMasterTitlebar.SelectedIndex == 0 || rpMasterTitlebar.SelectedIndex == 1 ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private void Navigate_Invoked(Microsoft.UI.Xaml.Controls.NavigationMenuItem sender, object args)
