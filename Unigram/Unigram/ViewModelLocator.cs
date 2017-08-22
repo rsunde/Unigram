@@ -127,6 +127,7 @@ namespace Unigram
             container.ContainerBuilder.RegisterType<ChannelDetailsViewModel>();// .SingleInstance();
             container.ContainerBuilder.RegisterType<ChannelEditViewModel>();// .SingleInstance();
             container.ContainerBuilder.RegisterType<ChannelEditTypeViewModel>();// .SingleInstance();
+            container.ContainerBuilder.RegisterType<ChannelEditStickerSetViewModel>();// .SingleInstance();
             container.ContainerBuilder.RegisterType<ChannelAdminsViewModel>();// .SingleInstance();
             container.ContainerBuilder.RegisterType<ChannelBannedViewModel>();// .SingleInstance();
             container.ContainerBuilder.RegisterType<ChannelKickedViewModel>();// .SingleInstance();
@@ -193,11 +194,13 @@ namespace Unigram
 
         private void InitializeLayer()
         {
-            if (SettingsHelper.SupportedLayer < 69 || !SettingsHelper.IsAuthorized)
+            if (SettingsHelper.SupportedLayer < 71 || !SettingsHelper.IsAuthorized)
             {
                 DeleteIfExists("database.sqlite");
                 ApplicationSettings.Current.AddOrUpdateValue("lastGifLoadTime", 0L);
                 ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTime", 0L);
+                ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTimeMask", 0L);
+                ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTimeFavs", 0L);
             }
 
             SettingsHelper.SupportedLayer = Telegram.Api.Constants.SupportedLayer;
@@ -317,6 +320,8 @@ namespace Unigram
 
             ApplicationSettings.Current.AddOrUpdateValue("lastGifLoadTime", 0L);
             ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTime", 0L);
+            ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTimeMask", 0L);
+            ApplicationSettings.Current.AddOrUpdateValue("lastStickersLoadTimeFavs", 0L);
 
             Debug.WriteLine("!!! UNAUTHORIZED !!!");
 

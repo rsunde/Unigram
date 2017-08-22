@@ -297,6 +297,16 @@ namespace Unigram.ViewModels
 
         public TLVector<TLTopPeerCategoryPeers> TopPeers { get; private set; }
 
+        class TLHelpGetScheme : TLObject
+        {
+            public override TLType TypeId => (TLType)0xF9C35A14;
+
+            public override void Write(TLBinaryWriter to)
+            {
+                to.Write(0xF9C35A14);
+            }
+        }
+
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
             Task.Run(() => _pushService.RegisterAsync());
