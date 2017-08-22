@@ -107,9 +107,39 @@
                                    ExpandedModeThresholdWidth="Infinity">
                 <fluent:NavigationView.Header>
                     <Grid>
-                        <controls:PageHeader/>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <controls:PageHeader Grid.ColumnSpan="2"/>
                         <TextBlock x:Name="DefaultHeader" Text="{x:Bind rpMasterTitlebar.SelectedItem.(PivotItem.Header), Mode=OneWay}" VerticalAlignment="Center" Margin="60,0,0,0" Style="{StaticResource BaseTextBlockStyle}"/>
 
+                        <Button x:Name="ButtonOptions"
+                                Padding="16,23,16,0"
+                                Style="{StaticResource EllipsisButton}"
+                                Grid.Column="1">
+                            <FontIcon x:Name="EllipsisIcon"
+                                      VerticalAlignment="Center"
+                                      FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                      FontSize="16"
+                                      Glyph="&#xE10C;"
+                                      Height="{ThemeResource AppBarExpandButtonCircleDiameter}" />
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="EditNameItem"
+                                                    Click="{x:Bind SettingsView.EditName_Click}"
+                                                    Style="{StaticResource IconMenuFlyoutItemStyle}"
+                                                    Text="Edit name"
+                                                    Tag="&#xE104;"/>
+                                    <MenuFlyoutItem x:Name="LogoutItem"
+                                                    Command="{x:Bind SettingsView.ViewModel.LogoutCommand}"
+                                                    Style="{StaticResource IconMenuFlyoutItemStyle}"
+                                                    Text="Logout"
+                                                    Tag="&#xE106;"/>
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        
                         <controls:SearchTextBox x:Name="SearchDialogs"
                                                 Padding="60,3,6,5"
                                                 Background="{x:Null}"
@@ -120,6 +150,7 @@
                                                 PlaceholderText="Search for chats and messages"
                                                 TextChanged="txtSearch_TextChanged"
                                                 KeyDown="txtSearch_KeyDown"
+                                                Grid.ColumnSpan="2"
                                                 Canvas.ZIndex="1"/>
                         <controls:SearchTextBox x:Name="SearchContacts"
                                                 Padding="60,3,6,5"
@@ -131,6 +162,7 @@
                                                 PlaceholderText="Search for contacts and usernames"
                                                 TextChanged="txtSearch_TextChanged"
                                                 KeyDown="txtSearch_KeyDown"
+                                                Grid.ColumnSpan="2"
                                                 Canvas.ZIndex="1"/>
                     </Grid>
                 </fluent:NavigationView.Header>
