@@ -1,269 +1,220 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Contacts;
+using Telegram.Td.Api;
 using Unigram.Collections;
 using Unigram.Common;
+using Unigram.Controls;
 using Unigram.Converters;
-using Unigram.Core.Services;
+using Unigram.Services;
+using Unigram.ViewModels.Supergroups;
 
 namespace Unigram.ViewModels
 {
-    public class ContactsViewModel : UnigramViewModelBase, IHandle<TLUpdateUserStatus>, IHandle<TLUpdateContactLink>
+    public class ContactsViewModel : TLViewModelBase, IChildViewModel, IHandle<UpdateUserStatus>
     {
-        private IContactsService _contactsService;
+        private readonly IContactsService _contactsService;
 
-        public ContactsViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator, IContactsService contactsService)
-            : base(protoService, cacheService, aggregator)
+        private readonly DisposableMutex _loadMoreLock;
+
+        public ContactsViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator, IContactsService contactsService)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             _contactsService = contactsService;
 
-            Items = new SortedObservableCollection<TLUser>(new TLUserComparer(true));
-            Search = new ObservableCollection<KeyedList<string, TLObject>>();
+            _loadMoreLock = new DisposableMutex();
+
+            Items = new SortedObservableCollection<User>(new UserComparer(Settings.IsContactsSortedByEpoch));
+
+            Initialize();
         }
 
-        public async void LoadContacts()
+        private async void Initialize()
         {
-            await LoadContactsAsync();
-        }
-
-        public async Task LoadContactsAsync()
-        {
-            //var contacts = CacheService.GetContacts();
-            //foreach (var item in contacts.OfType<TLUser>())
-            //{
-            //    var user = item as TLUser;
-            //    if (user.IsSelf)
-            //    {
-            //        continue;
-            //    }
-
-            //    //var status = LastSeenHelper.GetLastSeen(user);
-            //    //var listItem = new UsersPanelListItem(user as TLUser);
-            //    //listItem.fullName = user.FullName;
-            //    //listItem.lastSeen = status.Item1;
-            //    //listItem.lastSeenEpoch = status.Item2;
-            //    //listItem.Photo = listItem._parent.Photo;
-            //    //listItem.PlaceHolderColor = BindConvert.Current.Bubble(listItem._parent.Id);
-
-            //    Items.Add(user);
-            //}
-
-            var contacts = new List<TLUserBase>();
-
-            //var input = string.Join(",", contacts.Select(x => x.Id).Union(new[] { SettingsHelper.UserId }).OrderBy(x => x));
-            //var hash = Utils.ComputeMD5(input);
-            //var hex = BitConverter.ToString(hash).Replace("-", string.Empty).ToLower();
-
-            var hash = CalculateContactsHash(0, contacts.OrderBy(x => x.Id));
-
-            var response = await ProtoService.GetContactsAsync(hash);
-            if (response.IsSucceeded)
+            if (!Settings.IsContactsSyncRequested)
             {
-                var result = response.Result as TLContactsContacts;
-                if (result != null)
-                {
-                    BeginOnUIThread(() =>
-                    {
-                        foreach (var item in result.Users.OfType<TLUser>())
-                        {
-                            var user = item as TLUser;
-                            if (user.IsSelf)
-                            {
-                                continue;
-                            }
+                Settings.IsContactsSyncRequested = true;
 
-                            Items.Add(user);
+                var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.ContactsPermissionAlert, Strings.Resources.AppName, Strings.Resources.ContactsPermissionAlertContinue, Strings.Resources.ContactsPermissionAlertNotNow);
+                if (confirm != Windows.UI.Xaml.Controls.ContentDialogResult.Primary)
+                {
+                    Settings.IsContactsSyncEnabled = false;
+                    await _contactsService.RemoveAsync();
+                }
+
+                if (Settings.IsContactsSyncEnabled)
+                {
+                    ProtoService.Send(new GetContacts(), async result =>
+                    {
+                        if (result is Telegram.Td.Api.Users users)
+                        {
+                            await _contactsService.SyncAsync(users);
                         }
                     });
-
-                    if (ApplicationSettings.Current.IsContactsSyncEnabled)
-                    {
-                        await _contactsService.SyncContactsAsync(response.Result);
-                    }
                 }
             }
+        }
 
+        public async void Activate()
+        {
             Aggregator.Subscribe(this);
-        }
 
-        public static int CalculateContactsHash(int savedCount, IEnumerable<TLUserBase> contacts)
-        {
-            if (contacts == null)
+            using (await _loadMoreLock.WaitAsync())
             {
-                return 0;
-            }
-
-            long acc = 0;
-            acc = ((acc * 20261) + 0x80000000L + savedCount) % 0x80000000L;
-
-            foreach (var contact in contacts)
-            {
-                if (contact == null) continue;
-
-                acc = ((acc * 20261) + 0x80000000L + contact.Id) % 0x80000000L;
-            }
-
-            return (int)acc;
-        }
-
-        public async Task GetSelfAsync()
-        {
-            var cached = CacheService.GetUser(SettingsHelper.UserId) as TLUser;
-            if (cached != null)
-            {
-                //var status = LastSeenHelper.GetLastSeen(cached);
-                //var listItem = new UsersPanelListItem(cached as TLUser);
-                //listItem.fullName = cached.FullName;
-                //listItem.lastSeen = status.Item1;
-                //listItem.lastSeenEpoch = status.Item2;
-                //listItem.Photo = listItem._parent.Photo;
-                //listItem.PlaceHolderColor = BindConvert.Current.Bubble(listItem._parent.Id);
-
-                Self = cached;
-            }
-            else
-            {
-                var response = await ProtoService.GetUsersAsync(new TLVector<TLInputUserBase> { new TLInputUserSelf() });
-                if (response.IsSucceeded)
+                var response = await ProtoService.SendAsync(new GetContacts());
+                if (response is Telegram.Td.Api.Users users)
                 {
-                    var user = response.Result.FirstOrDefault() as TLUser;
-                    if (user != null)
-                    {
-                        //var status = LastSeenHelper.GetLastSeen(user);
-                        //var listItem = new UsersPanelListItem(user as TLUser);
-                        //listItem.fullName = user.FullName;
-                        //listItem.lastSeen = status.Item1;
-                        //listItem.lastSeenEpoch = status.Item2;
-                        //listItem.Photo = listItem._parent.Photo;
-                        //listItem.PlaceHolderColor = BindConvert.Current.Bubble(listItem._parent.Id);
+                    var items = new List<User>();
 
-                        Self = user;
+                    foreach (var id in users.UserIds)
+                    {
+                        var user = ProtoService.GetUser(id);
+                        if (user != null)
+                        {
+                            items.Add(user);
+                        }
                     }
+
+                    Items.ReplaceWith(items);
                 }
             }
         }
 
-        public async Task SearchAsync(string query)
+        public void Deactivate()
         {
-            Search.Clear();
+            Aggregator.Unsubscribe(this);
+        }
 
-            var contacts = CacheService.GetContacts().Where(x => CultureInfo.CurrentCulture.CompareInfo.IndexOf(x.FullName, query, CompareOptions.IgnoreCase) >= 0).ToList();
-            if (contacts.Count > 0)
+        public bool IsSortedByEpoch
+        {
+            get { return Settings.IsContactsSortedByEpoch; }
+            set
             {
-                Search.Add(new KeyedList<string, TLObject>("Contacts", contacts));
+                if (Settings.IsContactsSortedByEpoch != value)
+                {
+                    Settings.IsContactsSortedByEpoch = value;
+                    Load(value);
+
+                    RaisePropertyChanged(() => IsSortedByEpoch);
+                }
             }
+        }
 
-            var result = await ProtoService.SearchAsync(query, 100);
-            if (result.IsSucceeded)
+        private async void Load(bool epoch)
+        {
+            using (await _loadMoreLock.WaitAsync())
             {
-                Search.Add(new KeyedList<string, TLObject>("Global search", result.Result.Users));
+                var response = await ProtoService.SendAsync(new GetContacts());
+                if (response is Telegram.Td.Api.Users users)
+                {
+                    var items = new List<User>();
+
+                    foreach (var id in users.UserIds)
+                    {
+                        var user = ProtoService.GetUser(id);
+                        if (user != null)
+                        {
+                            items.Add(user);
+                        }
+                    }
+
+                    Items = new SortedObservableCollection<User>(new UserComparer(epoch));
+                    Items.ReplaceWith(items);
+                    RaisePropertyChanged(() => Items);
+                }
+            }
+        }
+
+        private SearchUsersCollection _search;
+        public SearchUsersCollection Search
+        {
+            get
+            {
+                return _search;
+            }
+            set
+            {
+                Set(ref _search, value);
             }
         }
 
         #region Handle
 
-        public void Handle(TLUpdateUserStatus message)
+        public void Handle(UpdateUserStatus update)
         {
+            var user = CacheService.GetUser(update.UserId);
+            if (user == null || user.Id == CacheService.Options.MyId || !user.IsContact)
+            {
+                return;
+            }
+
             BeginOnUIThread(() =>
             {
-                var first = Items.FirstOrDefault(x => x.Id == message.UserId);
+                var first = Items.FirstOrDefault(x => x != null && x.Id == update.UserId);
                 if (first != null)
                 {
                     Items.Remove(first);
                 }
 
-                var user = CacheService.GetUser(message.UserId) as TLUser;
-                if (user != null && user.IsContact && user.IsSelf == false)
-                {
-                    //var status = LastSeenHelper.GetLastSeen(user);
-                    //var listItem = new UsersPanelListItem(user as TLUser);
-                    //listItem.fullName = user.FullName;
-                    //listItem.lastSeen = status.Item1;
-                    //listItem.lastSeenEpoch = status.Item2;
-                    //listItem.Photo = listItem._parent.Photo;
-                    //listItem.PlaceHolderColor = BindConvert.Current.Bubble(listItem._parent.Id);
-
-                    Items.Add(user);
-                }
+                Items.Add(user);
             });
         }
 
-        public void Handle(TLUpdateContactLink update)
-        {
-            BeginOnUIThread(() =>
-            {
-                var contact = update.MyLink is TLContactLinkContact;
-                var already = Items.FirstOrDefault(x => x.Id == update.UserId);
-                if (already == null)
-                {
-                    if (contact)
-                    {
-                        var user = CacheService.GetUser(update.UserId) as TLUser;
-                        if (user != null)
-                        {
-                            Items.Add(user);
-                        }
-                    }
-                    return;
-                }
+        //public void Handle(TLUpdateContactLink update)
+        //{
+        //    BeginOnUIThread(() =>
+        //    {
+        //        //var contact = update.MyLink is TLContactLinkContact;
+        //        //var already = Items.FirstOrDefault(x => x != null && x.Id == update.UserId);
+        //        //if (already == null)
+        //        //{
+        //        //    if (contact)
+        //        //    {
+        //        //        var user = CacheService.GetUser(update.UserId) as TLUser;
+        //        //        if (user != null)
+        //        //        {
+        //        //            Items.Add(user);
+        //        //        }
+        //        //    }
+        //        //    return;
+        //        //}
 
-                if (contact)
-                {
-                    Items.Add(already);
-                    return;
-                }
+        //        //if (contact)
+        //        //{
+        //        //    Items.Add(already);
+        //        //    return;
+        //        //}
 
-                Items.Remove(already);
-            });
-        }
+        //        //Items.Remove(already);
+        //    });
+        //}
 
         #endregion
 
-        public SortedObservableCollection<TLUser> Items { get; private set; }
-
-        public ObservableCollection<KeyedList<string, TLObject>> Search { get; private set; }
-
-        private TLUser _self;
-        public TLUser Self
-        {
-            get
-            {
-                return _self;
-            }
-            set
-            {
-                Set(ref _self, value);
-            }
-        }
+        public SortedObservableCollection<User> Items { get; private set; }
     }
 
-    public class TLUserComparer : IComparer<TLUser>
+    public class UserComparer : IComparer<User>
     {
         private bool _epoch;
 
-        public TLUserComparer(bool epoch)
+        public UserComparer(bool epoch)
         {
             _epoch = epoch;
         }
 
-        public int Compare(TLUser x, TLUser y)
+        public int Compare(User x, User y)
         {
             if (_epoch)
             {
                 var epoch = LastSeenConverter.GetIndex(y).CompareTo(LastSeenConverter.GetIndex(x));
                 if (epoch == 0)
                 {
-                    var fullName = x.FullName.CompareTo(y.FullName);
+                    var nameX = x.FirstName.Length > 0 ? x.FirstName : x.LastName;
+                    var nameY = y.FirstName.Length > 0 ? y.FirstName : y.LastName;
+
+                    var fullName = nameX.CompareTo(nameY);
                     if (fullName == 0)
                     {
                         return y.Id.CompareTo(x.Id);
@@ -276,7 +227,15 @@ namespace Unigram.ViewModels
             }
             else
             {
-                var fullName = x.FullName.CompareTo(y.FullName);
+                if (x.Type is UserTypeDeleted)
+                {
+                    return 1;
+                }
+
+                var nameX = x.FirstName.Length > 0 ? x.FirstName : x.LastName;
+                var nameY = y.FirstName.Length > 0 ? y.FirstName : y.LastName;
+
+                var fullName = nameX.CompareTo(nameY);
                 if (fullName == 0)
                 {
                     return y.Id.CompareTo(x.Id);

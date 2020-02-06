@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Telegram.Td.Api;
+using Unigram.Common;
+using Unigram.Services;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.UI.ViewManagement;
@@ -20,14 +22,37 @@ namespace Unigram.Controls
 {
     public sealed partial class ZoomableGridViewPopup : Grid
     {
+        private ApplicationView _applicationView;
+
         public ZoomableGridViewPopup()
         {
-            this.InitializeComponent();
+            InitializeComponent();
+
+            _applicationView = ApplicationView.GetForCurrentView();
+            _applicationView.VisibleBoundsChanged += OnVisibleBoundsChanged;
+            OnVisibleBoundsChanged(_applicationView, null);
+        }
+
+        private void OnVisibleBoundsChanged(ApplicationView sender, object args)
+        {
+            if (sender == null)
+            {
+                return;
+            }
+
+            if (/*BackgroundElement != null &&*/ Window.Current?.Bounds is Rect bounds && sender.VisibleBounds != bounds)
+            {
+                Margin = new Thickness(sender.VisibleBounds.X - bounds.Left, sender.VisibleBounds.Y - bounds.Top, bounds.Width - (sender.VisibleBounds.Right - bounds.Left), bounds.Height - (sender.VisibleBounds.Bottom - bounds.Top));
+            }
+            else
+            {
+                Margin = new Thickness();
+            }
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            Margin = new Thickness(0, 0, 0, InputPane.GetForCurrentView().OccludedRect.Bottom);
+            Padding = new Thickness(0, 0, 0, InputPane.GetForCurrentView().OccludedRect.Height);
 
             InputPane.GetForCurrentView().Showing += InputPane_Showing;
             InputPane.GetForCurrentView().Hiding += InputPane_Hiding;
@@ -41,12 +66,58 @@ namespace Unigram.Controls
 
         private void InputPane_Showing(InputPane sender, InputPaneVisibilityEventArgs args)
         {
-            Margin = new Thickness(0, 0, 0, args.OccludedRect.Bottom);
+            Padding = new Thickness(0, 0, 0, args.OccludedRect.Height);
         }
 
         private void InputPane_Hiding(InputPane sender, InputPaneVisibilityEventArgs args)
         {
-            Margin = new Thickness();
+            Padding = new Thickness();
+        }
+
+
+        public async void SetSticker(IProtoService protoService, IEventAggregator aggregator, Sticker sticker)
+        {
+            Title.Text = string.Empty;
+            Texture.Constraint = sticker;
+
+            if (sticker.Thumbnail != null)
+            {
+                UpdateThumbnail(protoService, sticker.Thumbnail.Photo);
+            }
+
+            UpdateFile(protoService, sticker.StickerValue);
+
+            var response = await protoService.SendAsync(new GetStickerEmojis(new InputFileId(sticker.StickerValue.Id)));
+            if (response is Emojis emojis)
+            {
+                Title.Text = string.Join(" ", emojis.EmojisValue);
+            }
+        }
+
+        public async void UpdateFile(IProtoService protoService, File file)
+        {
+            if (file.Local.IsDownloadingCompleted)
+            {
+                Texture.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+            }
+            else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+            {
+                Texture.Source = null;
+                protoService.DownloadFile(file.Id, 1);
+            }
+        }
+
+        private async void UpdateThumbnail(IProtoService protoService, File file)
+        {
+            if (file.Local.IsDownloadingCompleted)
+            {
+                Container.Background = new ImageBrush { ImageSource = await PlaceholderHelper.GetWebpAsync(file.Local.Path) };
+            }
+            else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+            {
+                Container.Background = null;
+                protoService.DownloadFile(file.Id, 1);
+            }
         }
     }
 }

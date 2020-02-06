@@ -1,4 +1,4 @@
-﻿<controls:ContentDialogBase
+<controls:OverlayPage
     x:Class="Unigram.Controls.Views.RoundVideoView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -76,10 +76,10 @@
                         </GeometryGroup>
                     </Path.Data>
                 </Path>
-        
+
                 <!--<MediaPlayerElement x:Name="PlayerElement"/>-->
                 <controls:ProgressBarRing Value="0.5"/>
             </Grid>
         </Grid>
     </UserControl>
-</controls:ContentDialogBase>
+</controls:OverlayPage>

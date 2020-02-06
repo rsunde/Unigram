@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "WebPImage.h"
+#include "StringUtils.h"
 #include <wincodec.h>
 #include <shcore.h>
 
@@ -83,7 +84,7 @@ WebPImage^ WebPImage::CreateFromByteArray(const Array<uint8> ^bytes)
 	return image;
 }
 
-WriteableBitmap ^ Unigram::Native::WebPImage::DecodeFromBuffer(IBuffer ^ buffer)
+WriteableBitmap^ Unigram::Native::WebPImage::DecodeFromBuffer(IBuffer ^ buffer)
 {
 	ComPtr<IBufferByteAccess> bufferByteAccess;
 	reinterpret_cast<IInspectable*>(buffer)->QueryInterface(IID_PPV_ARGS(&bufferByteAccess));
@@ -92,6 +93,28 @@ WriteableBitmap ^ Unigram::Native::WebPImage::DecodeFromBuffer(IBuffer ^ buffer)
 	bufferByteAccess->Buffer(&webPBuffer);
 
 	WebPData webPData = { webPBuffer, buffer->Length };
+
+	return CreateWriteableBitmapFromWebPData(webPData);
+}
+
+WriteableBitmap^ Unigram::Native::WebPImage::DecodeFromPath(String^ path)
+{
+	std::string fileName = string_to_unmanaged(path);
+	FILE* file = fopen(fileName.c_str(), "rb");
+	if (file == NULL) {
+		return nullptr;
+	}
+
+	fseek(file, 0, SEEK_END);
+	size_t length = ftell(file);
+	fseek(file, 0, SEEK_SET);
+	char* buffer = (char*)malloc(length);
+	fread(buffer, 1, length, file);
+	fclose(file);
+
+	WebPData webPData;
+	webPData.bytes = (uint8_t*)buffer;
+	webPData.size = length;
 
 	return CreateWriteableBitmapFromWebPData(webPData);
 }

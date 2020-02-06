@@ -13,15 +13,19 @@ using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 
-// The Content Dialog item template is documented at https://go.microsoft.com/fwlink/?LinkId=234238
-
 namespace Unigram.Controls.Views
 {
-    public sealed partial class EditYourAboutView : ContentDialog
+    public sealed partial class EditYourAboutView : TLContentDialog
     {
-        public EditYourAboutView()
+        public EditYourAboutView(string bio)
         {
             this.InitializeComponent();
+
+            FieldAbout.Text = bio;
+
+            Title = Strings.Resources.UserBio;
+            PrimaryButtonText = Strings.Resources.OK;
+            SecondaryButtonText = Strings.Resources.Cancel;
         }
 
         public string About
@@ -29,10 +33,6 @@ namespace Unigram.Controls.Views
             get
             {
                 return FieldAbout.Text;
-            }
-            set
-            {
-                FieldAbout.Text = value ?? string.Empty;
             }
         }
 

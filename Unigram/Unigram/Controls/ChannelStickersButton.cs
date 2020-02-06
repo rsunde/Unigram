@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.TL;
 using Unigram.ViewModels;
+using Unigram.ViewModels.Dialogs;
 using Windows.UI.Xaml;
 
 namespace Unigram.Controls
@@ -32,34 +32,34 @@ namespace Unigram.Controls
 
         private void OnStickerSetChanged(TLChannelStickerSet set)
         {
-            if (set == null)
-            {
-                Visibility = Visibility.Collapsed;
-                return;
-            }
+            //if (set == null)
+            //{
+            //    Visibility = Visibility.Collapsed;
+            //    return;
+            //}
 
-            var channel = set.With as TLChannel;
-            if (channel == null)
-            {
-                return;
-            }
+            //var channel = set.With as TLChannel;
+            //if (channel == null)
+            //{
+            //    return;
+            //}
 
-            var channelFull = set.Full as TLChannelFull;
-            if (channelFull == null)
-            {
-                return;
-            }
+            //var channelFull = set.Full as TLChannelFull;
+            //if (channelFull == null)
+            //{
+            //    return;
+            //}
 
-            if (channel.IsCreator || (channel.HasAdminRights && channel.AdminRights.IsChangeInfo))
-            {
-                Glyph = "\uE115";
-                Visibility = Visibility.Visible;
-            }
-            else
-            {
-                Glyph = "\uE10A";
-                Visibility = Visibility.Visible;
-            }
+            //if (channel.IsCreator || (channel.HasAdminRights && channel.AdminRights.IsChangeInfo))
+            //{
+            //    Glyph = "\uE115";
+            //    Visibility = Visibility.Visible;
+            //}
+            //else
+            //{
+            //    Glyph = "\uE10A";
+            //    Visibility = Visibility.Visible;
+            //}
         }
 
 

@@ -3,25 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Payments;
 using Template10.Services.NavigationService;
 using Unigram.Views.Payments;
+using Unigram.Services;
+using Telegram.Td.Api;
 
 namespace Unigram.ViewModels.Payments
 {
-    public class PaymentFormViewModelBase : UnigramViewModelBase
+    public class PaymentFormViewModelBase : TLViewModelBase
     {
-        public PaymentFormViewModelBase(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator) 
-            : base(protoService, cacheService, aggregator)
+        public PaymentFormViewModelBase(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator) 
+            : base(protoService, cacheService, settingsService, aggregator)
         {
         }
 
-        protected TLMessage _message;
-        public TLMessage Message
+        protected Message _message;
+        public Message Message
         {
             get
             {
@@ -33,8 +30,8 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        protected TLMessageMediaInvoice _invoice = new TLMessageMediaInvoice();
-        public TLMessageMediaInvoice Invoice
+        protected MessageInvoice _invoice;
+        public MessageInvoice Invoice
         {
             get
             {
@@ -46,8 +43,8 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        protected TLPaymentsPaymentForm _paymentForm;
-        public TLPaymentsPaymentForm PaymentForm
+        protected PaymentForm _paymentForm;
+        public PaymentForm PaymentForm
         {
             get
             {

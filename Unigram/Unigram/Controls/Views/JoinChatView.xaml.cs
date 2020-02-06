@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
+using Unigram.Common;
+using Unigram.Services;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.UI.Xaml;
@@ -14,32 +16,43 @@ using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 
-// The Content Dialog item template is documented at https://go.microsoft.com/fwlink/?LinkId=234238
-
 namespace Unigram.Controls.Views
 {
-    public sealed partial class JoinChatView : BottomSheet
+    public sealed partial class JoinChatView : TLContentDialog
     {
-        public TLChatInvite ViewModel => DataContext as TLChatInvite;
+        private IProtoService _protoService;
 
-        public JoinChatView()
+        public JoinChatView(IProtoService protoService, ChatInviteLinkInfo info)
         {
-            this.InitializeComponent();
-        }
+            InitializeComponent();
 
-        public string ConvertCount(int total, bool hasParticipants)
-        {
-            var key = "{0} members";
-            if (total == 1)
+            _protoService = protoService;
+
+            Photo.Source = PlaceholderHelper.GetChat(protoService, info, 72);
+
+            Title.Text = info.Title;
+            Subtitle.Text = ConvertCount(info.MemberCount, info.MemberUserIds.Count == 0);
+
+            PrimaryButtonText = Strings.Resources.ChannelJoin;
+            SecondaryButtonText = Strings.Resources.Cancel;
+
+            if (info.MemberUserIds.Count > 0)
             {
-                key = hasParticipants ? "{0} member:" : "{0} member";
+                FooterPanel.Visibility = ConvertMoreVisibility(info.MemberCount, info.MemberUserIds.Count);
+                Footer.Text = ConvertMore(info.MemberCount, info.MemberUserIds.Count);
+
+                Members.Visibility = Visibility.Visible;
+                Members.ItemsSource = protoService.GetUsers(info.MemberUserIds);
             }
             else
             {
-                key = hasParticipants ? "{0} members:" : "{0} members";
+                Members.Visibility = Visibility.Collapsed;
             }
+        }
 
-            return string.Format(key, total);
+        public string ConvertCount(int total, bool broadcast)
+        {
+            return Locale.Declension(broadcast ? "Subscribers" : "Members", total);
         }
 
         public Visibility ConvertMoreVisibility(int total, int count)
@@ -54,12 +67,41 @@ namespace Unigram.Controls.Views
 
         private void Join_Click(object sender, RoutedEventArgs e)
         {
-            Hide(ContentDialogBaseResult.OK);
+            Hide();
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
-            Hide(ContentDialogBaseResult.Cancel);
+            Hide();
+        }
+
+        private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as StackPanel;
+            var user = args.Item as User;
+
+            if (args.Phase == 0)
+            {
+                var title = content.Children[1] as TextBlock;
+                title.Text = user.GetFullName();
+            }
+            else if (args.Phase == 2)
+            {
+                var photo = content.Children[0] as ProfilePicture;
+                photo.Source = PlaceholderHelper.GetUser(_protoService, user, 48);
+            }
+
+            if (args.Phase < 2)
+            {
+                args.RegisterUpdateCallback(OnContainerContentChanging);
+            }
+
+            args.Handled = true;
         }
     }
 }

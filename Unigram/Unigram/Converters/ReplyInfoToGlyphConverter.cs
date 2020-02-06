@@ -4,103 +4,111 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Windows.UI.Xaml.Data;
-using Telegram.Api.TL;
+using Unigram.ViewModels;
+using Telegram.Td.Api;
 
 namespace Unigram.Converters
 {
-    public class ReplyInfoToGlyphConverter : IValueConverter
+    public class ReplyInfoToGlyphConverter
     {
         public const string EditGlyph = "\uE104";
         public const string ReplyGlyph = "\uE248";
         public const string GlobeGlyph = "\uE12B";
-        public const string ForwardGlyph = "\uE111";
+        public const string ForwardGlyph = "\uE72D";
         public const string LoadingGlyph = "\uE1CD";
         public const string SendGlyph = "\uE725";
         public const string ConfirmGlyph = "\uE10B";
 
-        public object Convert(object value, Type targetType, object parameter, string language)
-        {
-            if (value == null)
-            {
-                if (parameter != null)
-                {
-                    return SendGlyph;
-                }
+        public const string AttachGlyph = "\uE917";
+        public const string AttachEditGlyph = "\uE918";
+    }
 
-                return null;
-            }
+    public class Icons
+    {
+        public const string Download = "\uE118";
+        public const string Cancel = "\uE10A";
+        public const string Play = "\uE102";
+        public const string Pause = "\uE103";
+        public const string Confirm = "\uE10B";
+        public const string Ttl = "\uE60E";
+        public const string Document = "\uE160";
+        public const string Animation = "\uE906";
+        public const string Theme = "\uE2B1";
 
-            if (parameter != null)
-            {
-                var replyInfo = value as ReplyInfo;
-                if (replyInfo != null)
-                {
-                    var container = replyInfo.Reply as TLMessagesContainter;
-                    if (container != null)
-                    {
-                        return container.EditMessage != null ? ConfirmGlyph : SendGlyph;
-                    }
-                }
+        public const string Retry = "\uE72C";
 
-                return SendGlyph;
-            }
-            else
-            {
-                var replyInfo = value as ReplyInfo;
-                if (replyInfo == null)
-                {
-                    return ReplyGlyph;
-                }
-                else
-                {
-                    if (replyInfo.Reply == null)
-                    {
-                        return LoadingGlyph;
-                    }
+        public const string Undo = "\uE7A7";
+        public const string Redo = "\uE7A6";
+        public const string Cut = "\uE8C6";
+        public const string Copy = "\uE8C8";
+        public const string Paste = "\uE77F";
 
-                    var container = replyInfo.Reply as TLMessagesContainter;
-                    if (container != null)
-                    {
-                        return GetMessagesContainerTemplate(container, parameter);
-                    }
+        public const string Bold = "\uE8DD";
+        public const string Italic = "\uE8DB";
+        public const string Underline = "\uE8DC";
+        public const string Strikethrough = "\uE8DE";
+        public const string Monospace = "\uE943";
+        public const string Link = "\uE71B";
 
-                    if (replyInfo.ReplyToMsgId == null || replyInfo.ReplyToMsgId.Value == 0)
-                    {
-                        return ReplyGlyph;
-                    }
+        public const string BasicGroup = "\uE125";
+        public const string Group = "\uE902";
+        public const string Channel = "\uE789";
+        public const string Secret = "\uE1F6";
+        public const string Bot = "\uE99A";
 
-                    return ReplyGlyph;
-                }
-            }
-        }
+        public const string Reply = "\uE248";
+        public const string Edit = "\uE104";
+        public const string Timer = "\uE916";
+        public const string Report = "\uE730";
+        public const string Clear = "\uEA99";
+        public const string Schedule = "\uE81C";
 
-        public object ConvertBack(object value, Type targetType, object parameter, string language)
-        {
-            throw new NotImplementedException();
-        }
+        public const string Mute = "\uE7ED";
+        public const string Unmute = "\uEA8F";
 
-        private string GetMessagesContainerTemplate(TLMessagesContainter container, object parameter)
-        {
-            if (container.WebPageMedia != null)
-            {
-                var webpageMedia = container.WebPageMedia as TLMessageMediaWebPage;
-                if (webpageMedia != null)
-                {
-                    return GlobeGlyph;
-                }
-            }
+        public const string Pin = "\uE840";
+        public const string Unpin = "\uE77A";
 
-            if (container.FwdMessages != null)
-            {
-                return ForwardGlyph;
-            }
+        public const string MarkAsRead = "\uE91D";
+        public const string MarkAsUnread = "\uE91C";
 
-            if (container.EditMessage != null)
-            {
-                return EditGlyph;
-            }
+        public const string CopyLink = "\uE71B";
+        public const string CopyImage = "\uEB9F";
 
-            return ReplyGlyph;
-        }
+        public const string Stickers = "\uF4AA";
+        public const string Animations = "\uF4A9";
+
+        public const string Favorite = "\uE734";
+        public const string Unfavorite = "\uE8D9";
+
+        public const string Message = "\uE8BD";
+
+        public const string Archive = "\uE7B8";
+
+        public const string Send = "\uE919";
+
+        public const string Delete = "\uE74D";
+        public const string Forward = "\uE72D";
+        public const string Select = "\uE762";
+        public const string SaveAs = "\uE792";
+        public const string Folder = "\uE838";
+        public const string OpenIn = "\uE7AC";
+        public const string OpenInNewWindow = "\uE8A7";
+
+        public const string Contact = "\uE8D4";
+        public const string AddUser = "\uE8FA";
+
+        public const string Admin = "\uE734";
+        public const string Restricted = "\uE72E";
+        public const string Banned = "\uF140";
+
+        public const string Share = "\uE72D";
+        public const string Search = "\uE721";
+        public const string Settings = "\uE713";
+
+        public const string Camera = "\uE722";
+        public const string Photo = "\uEB9F";
+
+        public const string Statistics = "\uE9D2";
     }
 }

@@ -3,198 +3,220 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.Services.FileManager;
-using Telegram.Api.Services.Updates;
-using Telegram.Api.TL;
 using Unigram.Common;
 using Unigram.Controls;
 using Unigram.Converters;
-using Unigram.Core.Helpers;
-using Unigram.Core.Services;
 using Unigram.Services;
-using Unigram.Strings;
 using Unigram.Views;
 using Windows.Storage;
-using Windows.System;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
+using Telegram.Td.Api;
+using Windows.ApplicationModel.Core;
+using Windows.Foundation.Metadata;
+using Unigram.ViewModels.Delegates;
+using Unigram.Views.Settings;
+using Unigram.Collections;
+using System.Text.RegularExpressions;
+using Unigram.Views.Settings.Privacy;
+using System.Diagnostics;
+using Unigram.Views.Wallet;
 
 namespace Unigram.ViewModels
 {
-   public class SettingsViewModel : UnigramViewModelBase
+    public class SettingsViewModel : TLViewModelBase,
+         IDelegable<ISettingsDelegate>,
+         IHandle<UpdateUser>,
+         IHandle<UpdateUserFullInfo>,
+         IHandle<UpdateFile>
     {
-        private readonly IUpdatesService _updatesService;
-        private readonly IPushService _pushService;
+        private readonly INotificationsService _pushService;
         private readonly IContactsService _contactsService;
-        private readonly IUploadFileManager _uploadFileManager;
-        private readonly IStickersService _stickersService;
+        private readonly ISettingsSearchService _searchService;
 
-        public SettingsViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator, IUpdatesService updatesService, IPushService pushService, IContactsService contactsService, IUploadFileManager uploadFileManager, IStickersService stickersService) 
-            : base(protoService, cacheService, aggregator)
+        public ISettingsDelegate Delegate { get; set; }
+
+        public SettingsViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator, INotificationsService pushService, IContactsService contactsService, ISettingsSearchService searchService)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
-            _updatesService = updatesService;
             _pushService = pushService;
             _contactsService = contactsService;
-            _uploadFileManager = uploadFileManager;
-            _stickersService = stickersService;
+            _searchService = searchService;
 
             AskCommand = new RelayCommand(AskExecute);
-            LogoutCommand = new RelayCommand(LogoutExecute);
             EditPhotoCommand = new RelayCommand<StorageFile>(EditPhotoExecute);
+            NavigateCommand = new RelayCommand<SettingsSearchEntry>(NavigateExecute);
+
+            Results = new MvxObservableCollection<SettingsSearchEntry>();
         }
+
+        private Chat _chat;
+        public Chat Chat
+        {
+            get { return _chat; }
+            set { Set(ref _chat, value); }
+        }
+
+        private bool _hasPassportData;
+        public bool HasPassportData
+        {
+            get { return _hasPassportData; }
+            set { Set(ref _hasPassportData, value); }
+        }
+
+        public MvxObservableCollection<SettingsSearchEntry> Results { get; private set; }
 
         public override async Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            var cached = CacheService.GetUser(SettingsHelper.UserId) as TLUser;
-            if (cached != null)
+            var response = await ProtoService.SendAsync(new CreatePrivateChat(CacheService.Options.MyId, false));
+            if (response is Chat chat)
             {
-                Self = cached;
-            }
-            else
-            {
-                var response = await ProtoService.GetUsersAsync(new TLVector<TLInputUserBase> { new TLInputUserSelf() });
-                if (response.IsSucceeded)
+                Chat = chat;
+
+                Aggregator.Subscribe(this);
+                Delegate?.UpdateChat(chat);
+
+                if (chat.Type is ChatTypePrivate privata)
                 {
-                    var result = response.Result.FirstOrDefault() as TLUser;
-                    if (result != null)
+                    var item = ProtoService.GetUser(privata.UserId);
+                    var cache = ProtoService.GetUserFull(privata.UserId);
+
+                    Delegate?.UpdateUser(chat, item, false);
+
+                    if (cache == null)
                     {
-                        Self = result;
-                        SettingsHelper.UserId = result.Id;
+                        ProtoService.Send(new GetUserFullInfo(privata.UserId));
+                    }
+                    else
+                    {
+                        Delegate?.UpdateUserFullInfo(chat, item, cache, false, false);
                     }
                 }
             }
 
-            var user = Self;
+            var passport = await ProtoService.SendAsync(new GetPasswordState());
+            if (passport is PasswordState passwordState)
+            {
+                HasPassportData = passwordState.HasPassportData;
+            }
+        }
+
+
+        public void Handle(UpdateUser update)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            if (chat.Type is ChatTypePrivate privata && privata.UserId == update.User.Id)
+            {
+                BeginOnUIThread(() => Delegate?.UpdateUser(chat, update.User, false));
+            }
+            else if (chat.Type is ChatTypeSecret secret && secret.UserId == update.User.Id)
+            {
+                BeginOnUIThread(() => Delegate?.UpdateUser(chat, update.User, true));
+            }
+        }
+
+        public void Handle(UpdateUserFullInfo update)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            if (chat.Type is ChatTypePrivate privata && privata.UserId == update.UserId)
+            {
+                BeginOnUIThread(() => Delegate?.UpdateUserFullInfo(chat, ProtoService.GetUser(update.UserId), update.UserFullInfo, false, false));
+            }
+        }
+
+        public void Handle(UpdateFile update)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            var user = CacheService.GetUser(chat);
             if (user == null)
             {
                 return;
             }
 
-            var full = CacheService.GetFullUser(user.Id);
-            if (full == null)
+            if (user.UpdateFile(update.File))
             {
-                var response = await ProtoService.GetFullUserAsync(user.ToInputUser());
-                if (response.IsSucceeded)
-                {
-                    full = response.Result;
-                }
-            }
-
-            Full = full;
-        }
-
-        private TLUser _self;
-        public TLUser Self
-        {
-            get
-            {
-                return _self;
-            }
-            set
-            {
-                Set(ref _self, value);
+                BeginOnUIThread(() => Delegate?.UpdateFile(update.File));
             }
         }
 
-        private TLUserFull _full;
-        public TLUserFull Full
-        {
-            get
-            {
-                return _full;
-            }
-            set
-            {
-                Set(ref _full, value);
-            }
-        }
+
 
         public RelayCommand<StorageFile> EditPhotoCommand { get; }
         private async void EditPhotoExecute(StorageFile file)
         {
-            var fileLocation = new TLFileLocation
-            {
-                VolumeId = TLLong.Random(),
-                LocalId = TLInt.Random(),
-                Secret = TLLong.Random(),
-                DCId = 0
-            };
-
-            var fileName = string.Format("{0}_{1}_{2}.jpg", fileLocation.VolumeId, fileLocation.LocalId, fileLocation.Secret);
-            var fileCache = await FileUtils.CreateTempFileAsync(fileName);
-
-            //var fileScale = await ImageHelper.ScaleJpegAsync(file, fileCache, 640, 0.77);
-
-            await file.CopyAndReplaceAsync(fileCache);
-            var fileScale = fileCache;
-
-            var basicProps = await fileScale.GetBasicPropertiesAsync();
-            var imageProps = await fileScale.Properties.GetImagePropertiesAsync();
-
-            var fileId = TLLong.Random();
-            var upload = await _uploadFileManager.UploadFileAsync(fileId, fileCache.Name, false);
-            if (upload != null)
-            {
-                var response = await ProtoService.UploadProfilePhotoAsync(upload.ToInputFile() as TLInputFile);
-                if (response.IsSucceeded)
-                {
-                    var photo = response.Result.Photo as TLPhoto;
-                }
-            }
+            var props = await file.GetBasicPropertiesAsync();
+            var response = await ProtoService.SendAsync(new SetProfilePhoto(await file.ToGeneratedAsync()));
         }
 
         public RelayCommand AskCommand { get; }
         private async void AskExecute()
         {
-            var confirm = await TLMessageDialog.ShowAsync(AppResources.TGSupportDisclaimerDetails, AppResources.Telegram, AppResources.TGSupportDisclaimerPrimaryText, AppResources.Cancel);
+            var text = Regex.Replace(Strings.Resources.AskAQuestionInfo, "<!\\[CDATA\\[(.*?)\\]\\]>", "$1");
+
+            var confirm = await TLMessageDialog.ShowAsync(text, Strings.Resources.AskAQuestion, Strings.Resources.AskButton, Strings.Resources.Cancel);
             if (confirm == ContentDialogResult.Primary)
             {
-                await Launcher.LaunchUriAsync(new Uri("https://telegram.org/faq"));
-            }
-            else
-            {
-                var response = await ProtoService.GetSupportAsync();
-                if (response.IsSucceeded)
+                var response = await ProtoService.SendAsync(new GetSupportUser());
+                if (response is User user)
                 {
-                    NavigationService.NavigateToDialog(response.Result.User);
+                    response = await ProtoService.SendAsync(new CreatePrivateChat(user.Id, false));
+                    if (response is Chat chat)
+                    {
+                        NavigationService.NavigateToChat(chat);
+                    }
                 }
             }
         }
 
-        public RelayCommand LogoutCommand { get; }
-        private async void LogoutExecute()
+        public void Search(string query)
         {
-            var confirm = await TLMessageDialog.ShowAsync(AppResources.TGLogoutText, AppResources.AppDisplayName, AppResources.OK, AppResources.Cancel);
-            if (confirm != ContentDialogResult.Primary)
+            Results.ReplaceWith(_searchService.Search(query));
+        }
+
+        public RelayCommand<SettingsSearchEntry> NavigateCommand { get; }
+        private void NavigateExecute(SettingsSearchEntry entry)
+        {
+            if (entry is SettingsSearchPage page && page.Page != null)
             {
-                return;
+                if (page.Page == typeof(SettingsPasscodePage))
+                {
+                    NavigationService.NavigateToPasscode();
+                }
+                else if (page.Page == typeof(InstantPage))
+                {
+                    NavigationService.NavigateToInstant(Strings.Resources.TelegramFaqUrl);
+                }
+                else if (page.Page == typeof(WalletPage))
+                {
+                    NavigationService.NavigateToWallet();
+                }
+                else
+                {
+                    NavigationService.Navigate(page.Page);
+                }
             }
-
-            await _pushService.UnregisterAsync();
-
-            var response = await ProtoService.LogOutAsync();
-            if (response.IsSucceeded)
+            else if (entry is SettingsSearchFaq faq)
             {
-                await _contactsService.UnsyncContactsAsync();
-
-                SettingsHelper.IsAuthorized = false;
-                SettingsHelper.UserId = 0;
-                ProtoService.ClearQueue();
-                _updatesService.ClearState();
-                _stickersService.Cleanup();
-                CacheService.ClearAsync();
-                CacheService.ClearConfigImportAsync();
-
-                await TLMessageDialog.ShowAsync(AppResources.TGLogoutSucceededDialogText, AppResources.AppDisplayName, AppResources.OK);
-                App.Current.Exit();
+                NavigationService.NavigateToInstant(faq.Url);
             }
-            else
+            else if (entry is SettingsSearchAction action)
             {
-
+                action.Action();
             }
         }
     }

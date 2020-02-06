@@ -1,49 +1,81 @@
-﻿<Page
+<Page
     x:Class="Unigram.Views.Settings.SettingsMasksPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Unigram.Views.Settings"
     xmlns:controls="using:Unigram.Controls"
-    xmlns:tl="using:Telegram.Api.TL"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Page.Transitions>
+        <TransitionCollection>
+            <NavigationThemeTransition>
+                <DrillInNavigationTransitionInfo/>
+            </NavigationThemeTransition>
+        </TransitionCollection>
+    </Page.Transitions>
+
+    <Grid Background="{ThemeResource PageBackgroundDarkBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition />
         </Grid.RowDefinitions>
-        <controls:PageHeader x:Uid="SettingsMasksPage_Header" Text="Masks"/>
+        <controls:PageHeader Text="{CustomResource Masks}"/>
 
-        <ListView ItemsSource="{x:Bind ViewModel.Items}"
-                  ItemTemplate="{StaticResource StickerSetItemTemplate}"
-                  ItemClick="ListView_ItemClick"
-                  IsItemClickEnabled="True"
-                  CanReorderItems="True"
-                  SelectionMode="None"
-                  AllowDrop="True"
-                  Grid.Row="1">
+        <controls:TableListView
+            ItemsSource="{x:Bind ViewModel.Items}"
+            ItemClick="ListView_ItemClick"
+            IsItemClickEnabled="True"
+            ContainerContentChanging="OnContainerContentChanging"
+            SelectionMode="None"
+            CanReorderItems="True"
+            AllowDrop="True"
+            Grid.Row="1">
             <ListView.Header>
-                <StackPanel>
-                    <controls:BadgeButton
-                        x:Uid="SettingsMasksPage_ArchivedStickers"
-                        Content="Archived Masks"
-                        Click="ArchivedStickers_Click"
-                        Badge="{x:Bind ViewModel.ArchivedStickersCount, Mode=OneWay}"
-                        Visibility="{x:Bind ViewModel.ArchivedStickersCount, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                        Style="{StaticResource BadgeButtonStyle}"/>
-                </StackPanel>
+                <Grid>
+                    <controls:HeaderedControl
+                        Header="{CustomResource ArchivedMasksInfo}"
+                        Visibility="{x:Bind ViewModel.ArchivedStickersCount, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <controls:BadgeButton
+                            Content="{CustomResource ArchivedMasks}"
+                            Click="ArchivedStickers_Click"
+                            Badge="{x:Bind ViewModel.ArchivedStickersCount, Mode=OneWay}"/>
+                    </controls:HeaderedControl>
+                    
+                    <Border
+                        Visibility="{x:Bind ViewModel.ArchivedStickersCount, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=inverse}"
+                        Height="16"/>
+                </Grid>
             </ListView.Header>
+            <ListView.Footer>
+                <Border Height="32"/>
+            </ListView.Footer>
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                     <Setter Property="Padding" Value="12,0,0,0"/>
                 </Style>
             </ListView.ItemContainerStyle>
-            <ListView.Footer>
-                <TextBlock x:Uid="SettingsMasksPage_Footer" Text="You can add masks to photos and videos you send. To do this, open the photo editor before sending a photo or video." Margin="12" Foreground="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}" Style="{StaticResource CaptionTextBlockStyle}"/>
-            </ListView.Footer>
-        </ListView>
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,6" Background="Transparent" ContextRequested="StickerSet_ContextRequested">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Image Width="48" Height="48" Margin="0,0,12,0" VerticalAlignment="Top" Grid.RowSpan="2"/>
+
+                        <TextBlock VerticalAlignment="Bottom" Style="{StaticResource BaseTextBlockStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Grid.Column="1"/>
+                        <TextBlock Foreground="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}" VerticalAlignment="Top" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Grid.Column="1" Grid.Row="1"/>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </controls:TableListView>
     </Grid>
 </Page>

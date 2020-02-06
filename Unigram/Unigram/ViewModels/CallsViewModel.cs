@@ -4,36 +4,38 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Template10.Utils;
+using Telegram.Td.Api;
+using Unigram.Collections;
 using Unigram.Common;
+using Unigram.Controls;
 using Unigram.Converters;
+using Unigram.Services;
 using Unigram.Strings;
-using Windows.UI.Xaml.Navigation;
+using Windows.UI.Xaml.Controls;
 
 namespace Unigram.ViewModels
 {
-    public class CallsViewModel : UnigramViewModelBase
+    public class CallsViewModel : TLViewModelBase
     {
-        public CallsViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator) 
-            : base(protoService, cacheService, aggregator)
+        public CallsViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator) 
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             Items = new ItemsCollection(protoService, cacheService);
+
+            CallDeleteCommand = new RelayCommand<TLCallGroup>(CallDeleteExecute);
         }
 
         public ItemsCollection Items { get; private set; }
 
         public class ItemsCollection : IncrementalCollection<TLCallGroup>
         {
-            private readonly IMTProtoService _protoService;
+            private readonly IProtoService _protoService;
             private readonly ICacheService _cacheService;
 
-            private int _lastMaxId;
+            private long _lastMaxId;
+            private bool _hasMoreItems = true;
 
-            public ItemsCollection(IMTProtoService protoService, ICacheService cacheService)
+            public ItemsCollection(IProtoService protoService, ICacheService cacheService)
             {
                 _protoService = protoService;
                 _cacheService = cacheService;
@@ -41,38 +43,46 @@ namespace Unigram.ViewModels
 
             public override async Task<IList<TLCallGroup>> LoadDataAsync()
             {
-                var response = await _protoService.SearchAsync(new TLInputPeerEmpty(), null, null, new TLInputMessagesFilterPhoneCalls(), 0, 0, 0, _lastMaxId, 50);
-                if (response.IsSucceeded)
+                var response = await _protoService.SendAsync(new SearchCallMessages(_lastMaxId, 50, false)); //(new TLInputPeerEmpty(), null, null, new TLInputMessagesFilterPhoneCalls(), 0, 0, 0, _lastMaxId, 50);
+                if (response is Messages messages)
                 {
-                    if (response.Result.Messages.Count > 0)
+                    if (messages.MessagesValue.Count > 0)
                     {
-                        _lastMaxId = response.Result.Messages.Min(x => x.Id);
+                        _lastMaxId = messages.MessagesValue.Min(x => x.Id);
+                    }
+                    else
+                    {
+                        _hasMoreItems = false;
                     }
 
                     List<TLCallGroup> groups = new List<TLCallGroup>();
-                    List<TLMessageService> currentMessages = null;
-                    TLUser currentPeer = null;
+                    List<Message> currentMessages = null;
+                    User currentPeer = null;
                     bool currentFailed = false;
                     DateTime? currentTime = null;
 
-                    foreach (TLMessageService message in response.Result.Messages)
+                    foreach (var message in messages.MessagesValue)
                     {
-                        var action = message.Action as TLMessageActionPhoneCall;
-
-                        var peer = _cacheService.GetUser(message.IsOut ? message.ToId.Id : message.FromId) as TLUser;
-                        if (peer == null)
+                        var chat = _protoService.GetChat(message.ChatId);
+                        if (chat == null)
                         {
-                            peer = response.Result.Users.FirstOrDefault(x => x.Id == (message.IsOut ? message.ToId.Id : message.FromId)) as TLUser;
+                            continue;
                         }
 
+                        var call = message.Content as MessageCall;
+                        if (call == null)
+                        {
+                            continue;
+                        }
+
+                        var peer = _protoService.GetUser(chat);
                         if (peer == null)
                         {
                             continue;
                         }
 
-                        var outgoing = message.IsOut;
-                        var reason = action.Reason;
-                        var missed = reason is TLPhoneCallDiscardReasonMissed || reason is TLPhoneCallDiscardReasonBusy;
+                        var outgoing = message.IsOutgoing;
+                        var missed = call.DiscardReason is CallDiscardReasonMissed || call.DiscardReason is CallDiscardReasonDeclined;
                         var failed = !outgoing && missed;
                         var time = BindConvert.Current.DateTime(message.Date);
 
@@ -90,7 +100,7 @@ namespace Unigram.ViewModels
                         }
 
                         currentPeer = peer;
-                        currentMessages = new List<TLMessageService> { message };
+                        currentMessages = new List<Message> { message };
                         currentFailed = failed;
                         currentTime = time;
                     }
@@ -105,32 +115,88 @@ namespace Unigram.ViewModels
 
                 return new TLCallGroup[0];
             }
+
+            protected override bool GetHasMoreItems()
+            {
+                return _hasMoreItems;
+            }
         }
+
+        #region Context menu
+
+        public RelayCommand<TLCallGroup> CallDeleteCommand { get; }
+        private async void CallDeleteExecute(TLCallGroup group)
+        {
+            var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.ConfirmDeleteCallLog, Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            //var messages = new TLVector<int>(group.Items.Select(x => x.Id).ToList());
+
+            //Task<MTProtoResponse<TLMessagesAffectedMessages>> task = null;
+
+            //var peer = group.Message.Parent.ToInputPeer();
+            //if (peer is TLInputPeerChannel channelPeer)
+            //{
+            //    task = LegacyService.DeleteMessagesAsync(new TLInputChannel { ChannelId = channelPeer.ChannelId, AccessHash = channelPeer.AccessHash }, messages);
+            //}
+            //else
+            //{
+            //    task = LegacyService.DeleteMessagesAsync(messages, false);
+            //}
+
+            //var response = await task;
+            //if (response.IsSucceeded)
+            //{
+            //    var cachedMessages = new TLVector<long>();
+            //    var remoteMessages = new TLVector<int>();
+            //    for (int i = 0; i < messages.Count; i++)
+            //    {
+            //        if (group.Items[i].RandomId.HasValue && group.Items[i].RandomId != 0L)
+            //        {
+            //            cachedMessages.Add(group.Items[i].RandomId.Value);
+            //        }
+            //        if (group.Items[i].Id > 0)
+            //        {
+            //            remoteMessages.Add(group.Items[i].Id);
+            //        }
+            //    }
+
+            //    CacheService.DeleteMessages(peer.ToPeer(), null, remoteMessages);
+            //    CacheService.DeleteMessages(cachedMessages);
+
+            //    Items.Remove(group);
+            //}
+        }
+
+        #endregion
     }
 
     public class TLCallGroup
     {
-        public TLCallGroup(IEnumerable<TLMessageService> messages, TLUser peer, bool failed)
+        public TLCallGroup(IEnumerable<Message> messages, User peer, bool failed)
         {
-            Items = new ObservableCollection<TLMessageService>(messages);
+            Items = new ObservableCollection<Message>(messages);
             Peer = peer;
-            Failed = failed;
+            IsFailed = failed;
         }
 
-        public ObservableCollection<TLMessageService> Items { get; private set; }
+        public ObservableCollection<Message> Items { get; private set; }
 
-        public TLUser Peer { get; private set; }
+        public User Peer { get; private set; }
 
-        public bool Failed { get; private set; }
+        public bool IsFailed { get; private set; }
 
         public override string ToString()
         {
             if (Items.Count > 1)
             {
-                return string.Format("{0} ({1}) - {2}", Peer.FullName, Items.Count, DisplayType);
+                return string.Format("{0} ({1}) - {2}", Peer.GetFullName(), Items.Count, DisplayType);
             }
 
-            return string.Format("{0} - {1}", Peer.FullName, DisplayType);
+            return string.Format("{0} - {1}", Peer.GetFullName(), DisplayType);
         }
 
         private string _displayType;
@@ -145,7 +211,7 @@ namespace Unigram.ViewModels
             }
         }
 
-        public TLMessageService Message
+        public Message Message
         {
             get
             {
@@ -163,19 +229,23 @@ namespace Unigram.ViewModels
 
         private string GetDisplayType()
         {
-            if (Failed)
+            if (IsFailed)
             {
-                return AppResources.CallMissedShort;
+                return Strings.Resources.CallMessageIncomingMissed;
             }
 
             var finalType = string.Empty;
             var types = new List<TLCallDisplayType>();
             foreach (var message in Items)
             {
-                var action = message.Action as TLMessageActionPhoneCall;
-                var outgoing = message.IsOut;
-                var reason = action.Reason;
-                var missed = reason is TLPhoneCallDiscardReasonMissed || reason is TLPhoneCallDiscardReasonBusy;
+                var call = message.Content as MessageCall;
+                if (call == null)
+                {
+                    continue;
+                }
+
+                var outgoing = message.IsOutgoing;
+                var missed = call.DiscardReason is CallDiscardReasonMissed || call.DiscardReason is CallDiscardReasonDeclined;
 
                 var type = missed ? (outgoing ? TLCallDisplayType.Cancelled : TLCallDisplayType.Missed) : (outgoing ? TLCallDisplayType.Outgoing : TLCallDisplayType.Incoming);
 
@@ -211,13 +281,17 @@ namespace Unigram.ViewModels
             if (Items.Count == 1)
             {
                 var message = Items[0];
-                var action = message.Action as TLMessageActionPhoneCall;
-                var reason = action.Reason;
-                var missed = reason is TLPhoneCallDiscardReasonMissed || reason is TLPhoneCallDiscardReasonBusy;
 
-                var callDuration = action.Duration ?? 0;
-                var duration = missed || callDuration < 1 ? null : BindConvert.Current.CallShortDuration(callDuration);
-                finalType = duration != null ? string.Format(AppResources.CallTimeFormat, finalType, duration) : finalType;
+                var call = message.Content as MessageCall;
+                if (call == null)
+                {
+                    return string.Empty;
+                }
+
+                var missed = call.DiscardReason is CallDiscardReasonMissed || call.DiscardReason is CallDiscardReasonDeclined;
+
+                var duration = missed || call.Duration < 1 ? null : Locale.FormatCallDuration(call.Duration);
+                finalType = duration != null ? string.Format("{0} ({1})", finalType, duration) : finalType;
             }
 
             return finalType;
@@ -228,13 +302,13 @@ namespace Unigram.ViewModels
             switch (type)
             {
                 case TLCallDisplayType.Outgoing:
-                    return AppResources.CallOutgoingShort;
+                    return Strings.Resources.CallMessageOutgoing;
                 case TLCallDisplayType.Incoming:
-                    return AppResources.CallIncomingShort;
+                    return Strings.Resources.CallMessageIncoming;
                 case TLCallDisplayType.Cancelled:
-                    return AppResources.CallCanceledShort;
+                    return Strings.Resources.CallMessageOutgoingMissed;
                 case TLCallDisplayType.Missed:
-                    return AppResources.CallMissedShort;
+                    return Strings.Resources.CallMessageIncomingMissed;
                 default:
                     return null;
             }

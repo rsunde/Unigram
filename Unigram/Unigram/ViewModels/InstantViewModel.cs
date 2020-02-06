@@ -3,31 +3,51 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
 using Unigram.Common;
+using Unigram.Controls;
 using Unigram.Controls.Views;
-using Unigram.Views;
+using Unigram.Services;
+using Unigram.Services.Factories;
+using Unigram.ViewModels.Delegates;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+using Windows.UI.Xaml.Navigation;
 
 namespace Unigram.ViewModels
 {
-    public class InstantViewModel : UnigramViewModelBase
+    public class InstantViewModel : TLViewModelBase
     {
-        public InstantViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator) 
-            : base(protoService, cacheService, aggregator)
+        private readonly IMessageFactory _messageFactory;
+
+        public InstantViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IMessageFactory messageFactory, IEventAggregator aggregator) 
+            : base(protoService, cacheService, settingsService, aggregator)
         {
-            _gallery = new InstantGalleryViewModel();
+            _messageFactory = messageFactory;
+            _gallery = new InstantGalleryViewModel(protoService, aggregator);
 
             ShareCommand = new RelayCommand(ShareExecute);
             FeedbackCommand = new RelayCommand(FeedbackExecute);
-            ChannelOpenCommand = new RelayCommand<TLChannel>(ChannelOpenExecute);
-            ChannelJoinCommand = new RelayCommand<TLChannel>(ChannelJoinExecute);
+            BrowserCommand = new RelayCommand(BrowserExecute);
+            CopyCommand = new RelayCommand(CopyExecute);
+        }
+
+        public override async Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
+        {
+            var response = await ProtoService.SendAsync(new GetWebPagePreview(new FormattedText((string)parameter, new TextEntity[0])));
+            if (response is WebPage webPage)
+            {
+                Title = webPage.SiteName;
+            }
         }
 
         public Uri ShareLink { get; set; }
         public string ShareTitle { get; set; }
+
+        public MessageViewModel CreateMessage(IMessageDelegate delegato, Message message)
+        {
+            return _messageFactory.Create(delegato, message);
+        }
 
         private InstantGalleryViewModel _gallery;
         public InstantGalleryViewModel Gallery
@@ -42,26 +62,11 @@ namespace Unigram.ViewModels
             }
         }
 
-        public RelayCommand<TLChannel> ChannelOpenCommand { get; }
-        private void ChannelOpenExecute(TLChannel channel)
+        private string _title;
+        public string Title
         {
-            if (channel != null)
-            {
-                NavigationService.NavigateToDialog(channel);
-            }
-        }
-
-        public RelayCommand<TLChannel> ChannelJoinCommand { get; }
-        private async void ChannelJoinExecute(TLChannel channel)
-        {
-            if (channel != null && channel.IsLeft)
-            {
-                var response = await ProtoService.JoinChannelAsync(channel);
-                if (response.IsSucceeded)
-                {
-                    channel.RaisePropertyChanged(() => channel.IsLeft);
-                }
-            }
+            get { return _title; }
+            set { Set(ref _title, value); }
         }
 
         public RelayCommand ShareCommand { get; }
@@ -69,27 +74,34 @@ namespace Unigram.ViewModels
         {
             if (ShareLink != null)
             {
-                await ShareView.Current.ShowAsync(ShareLink, ShareTitle);
+                await ShareView.GetForCurrentView().ShowAsync(ShareLink, ShareTitle);
             }
         }
 
         public RelayCommand FeedbackCommand { get; }
         private async void FeedbackExecute()
         {
-            var user = CacheService.GetUser("previews");
-            if (user == null)
+            var response = await ProtoService.SendAsync(new SearchPublicChat("previews"));
+            if (response is Chat chat)
             {
-                var response = await ProtoService.ResolveUsernameAsync("previews");
-                if (response.IsSucceeded)
-                {
-                    user = response.Result.Users.FirstOrDefault();
-                }
+                NavigationService.NavigateToChat(chat);
             }
+        }
 
-            if (user != null)
-            {
-                NavigationService.NavigateToDialog(user);
-            }
+        public RelayCommand BrowserCommand { get; }
+        private async void BrowserExecute()
+        {
+            await Launcher.LaunchUriAsync(ShareLink);
+        }
+
+        public RelayCommand CopyCommand { get; }
+        private async void CopyExecute()
+        {
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(ShareLink.AbsoluteUri);
+            ClipboardEx.TrySetContent(dataPackage);
+
+            await TLMessageDialog.ShowAsync(Strings.Resources.LinkCopied, Strings.Resources.AppName, Strings.Resources.OK);
         }
     }
 }

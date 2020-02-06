@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Unigram.ViewModels;
@@ -16,24 +15,123 @@ using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 using LinqToVisualTree;
 using Unigram.Common;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Messages;
 using System.Threading.Tasks;
-
-// The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
+using Unigram.Views.Settings;
+using Telegram.Td.Api;
+using System.Diagnostics;
+using Windows.Storage;
+using Unigram.Native;
+using System.Collections.Concurrent;
+using Windows.UI.Xaml.Media.Imaging;
+using Windows.UI;
+using System.Numerics;
+using Unigram.Services;
+using Unigram.ViewModels.Delegates;
+using System.Reactive.Linq;
+using Windows.Foundation.Metadata;
+using Unigram.Converters;
+using Unigram.Views;
 
 namespace Unigram.Controls.Views
 {
-    public sealed partial class StickersView : UserControl
+    public sealed partial class StickersView : UserControl, IFileDelegate
     {
         public DialogViewModel ViewModel => DataContext as DialogViewModel;
 
-        public ItemClickEventHandler StickerClick { get; set; }
-        public ItemClickEventHandler GifClick { get; set; }
+        public FrameworkElement Presenter => BackgroundElement;
+
+        public Action<string> EmojiClick { get; set; }
+        public Action<Sticker> StickerClick { get; set; }
+        public Action<Animation> AnimationClick { get; set; }
+
+        private FileContext<ViewModels.Dialogs.StickerViewModel> _stickers = new FileContext<ViewModels.Dialogs.StickerViewModel>();
+        private FileContext<Animation> _animations = new FileContext<Animation>();
+
+        private StickersPanelMode _widget;
 
         public StickersView()
         {
             InitializeComponent();
+
+            var shadow1 = DropShadowEx.Attach(HeaderSeparator, 20, 0.25f);
+            var shadow2 = DropShadowEx.Attach(Separator, 20, 0.25f);
+
+            HeaderSeparator.SizeChanged += (s, args) =>
+            {
+                shadow1.Size = args.NewSize.ToVector2();
+            };
+
+            Separator.SizeChanged += (s, args) =>
+            {
+                shadow2.Size = args.NewSize.ToVector2();
+            };
+
+            var observable = Observable.FromEventPattern<TextChangedEventArgs>(FieldStickers, "TextChanged");
+            var throttled = observable.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(async x =>
+            {
+                var items = ViewModel.Stickers.SearchStickers;
+                if (items != null && string.Equals(FieldStickers.Text, items.Query))
+                {
+                    await items.LoadMoreItemsAsync(1);
+                    await items.LoadMoreItemsAsync(2);
+                }
+            });
+
+            var observable2 = Observable.FromEventPattern<TextChangedEventArgs>(FieldAnimations, "TextChanged");
+            var throttled2 = observable2.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(x =>
+            {
+                ViewModel.Stickers.FindAnimations(FieldAnimations.Text);
+                //var items = ViewModel.Stickers.SearchStickers;
+                //if (items != null && string.Equals(FieldStickers.Text, items.Query))
+                //{
+                //    await items.LoadMoreItemsAsync(1);
+                //    await items.LoadMoreItemsAsync(2);
+                //}
+            });
+
+            switch (SettingsService.Current.Stickers.SelectedTab)
+            {
+                case Services.Settings.StickersTab.Emoji:
+                    Pivot.SelectedIndex = 0;
+                    break;
+                case Services.Settings.StickersTab.Animations:
+                    Pivot.SelectedIndex = 1;
+                    break;
+                case Services.Settings.StickersTab.Stickers:
+                    Pivot.SelectedIndex = 2;
+                    break;
+            }
+
+            if (ApiInformation.IsPropertyPresent("Windows.UI.Xaml.UIElement", "Shadow"))
+            {
+                var themeShadow = new ThemeShadow();
+                BackgroundElement.Shadow = themeShadow;
+                BackgroundElement.Translation += new Vector3(0, 0, 32);
+
+                themeShadow.Receivers.Add(ShadowElement);
+            }
+        }
+
+        public void SetView(StickersPanelMode mode)
+        {
+            _widget = mode;
+
+            Emojis?.SetView(mode);
+            VisualStateManager.GoToState(this, mode == StickersPanelMode.Overlay
+                ? "FilledState"
+                : mode == StickersPanelMode.Sidebar
+                ? "SidebarState"
+                : "NarrowState", false);
+        }
+
+        private void OnDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+        {
+            if (ViewModel != null) Bindings.Update();
+            if (ViewModel == null) Bindings.StopTracking();
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -41,9 +139,146 @@ namespace Unigram.Controls.Views
             Bindings.StopTracking();
         }
 
-        private void Gifs_ItemClick(object sender, ItemClickEventArgs e)
+        public async void UpdateFile(File file)
         {
-            GifClick?.Invoke(sender, e);
+            if (!file.Local.IsDownloadingCompleted)
+            {
+                return;
+            }
+
+            if (_stickers.TryGetValue(file.Id, out List<ViewModels.Dialogs.StickerViewModel> items) && items.Count > 0)
+            {
+                foreach (var item in items)
+                {
+                    item.UpdateFile(file);
+
+                    var container = Stickers.ContainerFromItem(item) as SelectorItem;
+                    if (container == null)
+                    {
+                        continue;
+                    }
+
+                    var content = container.ContentTemplateRoot as Image;
+                    content.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                }
+            }
+
+            foreach (MosaicMediaRow line in GifsView.Items)
+            {
+                var any = false;
+                foreach (var item in line)
+                {
+                    if (item.Item is Animation animation && animation.UpdateFile(file))
+                    {
+                        any = true;
+                    }
+                    else if (item.Item is InlineQueryResultAnimation inlineAnimation && inlineAnimation.Animation.UpdateFile(file))
+                    {
+                        any = true;
+                    }
+                }
+
+                if (!any)
+                {
+                    continue;
+                }
+
+                var container = GifsView.ContainerFromItem(line) as SelectorItem;
+                if (container == null)
+                {
+                    continue;
+                }
+
+                var content = container.ContentTemplateRoot as MosaicRow;
+                if (content == null)
+                {
+                    continue;
+                }
+
+                content.UpdateFile(line, file);
+            }
+
+            foreach (ViewModels.Dialogs.StickerSetViewModel stickerSet in Toolbar.Items)
+            {
+                if (stickerSet.Thumbnail == null && stickerSet.Covers == null)
+                {
+                    continue;
+                }
+
+                var cover = stickerSet.Thumbnail ?? stickerSet.Covers.FirstOrDefault()?.Thumbnail;
+                if (cover == null)
+                {
+                    continue;
+                }
+
+                var container = Toolbar.ContainerFromItem(stickerSet) as SelectorItem;
+                if (container == null)
+                {
+                    continue;
+                }
+
+                var content = container.ContentTemplateRoot as Image;
+                if (content == null)
+                {
+                    continue;
+                }
+
+                if (cover.UpdateFile(file))
+                {
+                    if (stickerSet.IsAnimated)
+                    {
+                        var bitmap = PlaceholderHelper.GetLottieFrame(file.Local.Path, 0, 36, 36);
+                        if (bitmap == null)
+                        {
+                            bitmap = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                        }
+
+                        content.Source = bitmap;
+                    }
+                    else
+                    {
+                        content.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                    }
+                }
+            }
+
+            //foreach (ViewModels.Dialogs.StickerViewModel item in Stickers.Items)
+            //{
+            //    if (item.UpdateFile(file) && file.Local.IsDownloadingCompleted)
+            //    {
+            //        var container = Stickers.ContainerFromItem(item) as SelectorItem;
+            //        if (container == null)
+            //        {
+            //            continue;
+            //        }
+
+            //        var content = container.ContentTemplateRoot as Image;
+            //        if (item.Thumbnail.Photo.Id == file.Id)
+            //        {
+            //            var temp = await StorageFile.GetFileFromPathAsync(file.Local.Path);
+            //            var buffer = await FileIO.ReadBufferAsync(temp);
+
+            //            content.Source = WebPImage.DecodeFromBuffer(buffer);
+            //        }
+            //    }
+            //}
+        }
+
+        private void Mosaic_Click(object item)
+        {
+            if (item is Animation animation)
+            {
+                Animation_Click(null, animation);
+            }
+            else if (item is InlineQueryResultAnimation inlineAnimation)
+            {
+                Animation_Click(null, inlineAnimation.Animation);
+            }
+        }
+
+        private void Animation_Click(object sender, Animation animation)
+        {
+            AnimationClick?.Invoke(animation);
 
             if (Window.Current.Bounds.Width >= 500)
             {
@@ -51,9 +286,20 @@ namespace Unigram.Controls.Views
             }
         }
 
+        private void Emojis_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is EmojiData emoji)
+            {
+                EmojiClick?.Invoke(emoji.Value);
+            }
+        }
+
         private void Stickers_ItemClick(object sender, ItemClickEventArgs e)
         {
-            StickerClick?.Invoke(sender, e);
+            if (e.ClickedItem is ViewModels.Dialogs.StickerViewModel sticker && sticker.StickerValue != null)
+            {
+                StickerClick?.Invoke(sticker.Get());
+            }
 
             if (Window.Current.Bounds.Width >= 500)
             {
@@ -63,7 +309,7 @@ namespace Unigram.Controls.Views
 
         private async void Featured_ItemClick(object sender, ItemClickEventArgs e)
         {
-            await StickerSetView.Current.ShowAsync(((TLDocument)e.ClickedItem).StickerSet);
+            //await StickerSetView.Current.ShowAsync(((TLDocument)e.ClickedItem).StickerSet);
         }
 
         private void Stickers_Loaded(object sender, RoutedEventArgs e)
@@ -79,6 +325,12 @@ namespace Unigram.Controls.Views
 
         private void Pivot_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (Pivot.SelectedIndex == 0 && Emojis == null)
+            {
+                FindName(nameof(Emojis));
+                Emojis.SetView(_widget);
+            }
+
             if (Pivot.SelectedIndex != 2)
             {
                 Toolbar.SelectedItem = null;
@@ -86,6 +338,22 @@ namespace Unigram.Controls.Views
             else
             {
                 ScrollingHost_ViewChanged(null, null);
+            }
+
+            if (ViewModel != null)
+            {
+                switch (Pivot.SelectedIndex)
+                {
+                    case 0:
+                        ViewModel.Settings.Stickers.SelectedTab = Services.Settings.StickersTab.Emoji;
+                        break;
+                    case 1:
+                        ViewModel.Settings.Stickers.SelectedTab = Services.Settings.StickersTab.Animations;
+                        break;
+                    case 2:
+                        ViewModel.Settings.Stickers.SelectedTab = Services.Settings.StickersTab.Stickers;
+                        break;
+                }
             }
 
             //if (Pivot.SelectedIndex == 0)
@@ -114,9 +382,8 @@ namespace Unigram.Controls.Views
 
         private void Toolbar_ItemClick(object sender, ItemClickEventArgs e)
         {
-            if (e.ClickedItem is TLMessagesStickerSet set && set.Cover != null)
+            if (e.ClickedItem is ViewModels.Dialogs.StickerSetViewModel set && set.Stickers != null)
             {
-                //Stickers.ScrollIntoView(set.Cover, ScrollIntoViewAlignment.Leading);
                 Stickers.ScrollIntoView(e.ClickedItem, ScrollIntoViewAlignment.Leading);
             }
         }
@@ -138,7 +405,7 @@ namespace Unigram.Controls.Views
                 if (first != null)
                 {
                     var header = Stickers.GroupHeaderContainerFromItemContainer(first) as GridViewHeaderItem;
-                    if (header != null && header != Toolbar.SelectedItem)
+                    if (header != null && header.Content != Toolbar.SelectedItem)
                     {
                         Toolbar.SelectedItem = header.Content;
                         Toolbar.ScrollIntoView(header.Content);
@@ -162,328 +429,310 @@ namespace Unigram.Controls.Views
         {
             ViewModel.GroupStickersCommand.Execute(null);
         }
-    }
 
-    public class ItemsTestPanel : Panel
-    {
-        private ListViewBase _listView;
-        private ScrollViewer _scrollingHost;
-
-        private Dictionary<int, int> itemSpans = new Dictionary<int, int>();
-        private List<List<int>> rows;
-        private Dictionary<int, int> itemsToRow = new Dictionary<int, int>();
-        private int calculatedWidth;
-        private double lineHeight = 100;
-
-        protected override Size MeasureOverride(Size availableSize)
+        private void Settings_Click(object sender, RoutedEventArgs e)
         {
-            if (_listView == null)
-                _listView = this.Ancestors<ListViewBase>().FirstOrDefault() as ListViewBase;
-
-            var count = Children.Count + 0;
-            var width = availableSize.Width - _listView.Padding.Left - _listView.Padding.Right;
-            var preferredRowSize = prepareLayout(width);
-
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Measure(new Size(itemSpans[i] / preferredRowSize * width, lineHeight));
-            }
-
-            return new Size(width, rows.Count * lineHeight);
+            ViewModel.NavigationService.Navigate(typeof(SettingsStickersPage));
         }
 
-        protected override Size ArrangeOverride(Size finalSize)
+        private void Install_Click(object sender, RoutedEventArgs e)
         {
-            var count = Children.Count + 0;
-            var width = finalSize.Width - _listView.Padding.Left - _listView.Padding.Right;
-            var preferredRowSize = prepareLayout(width);
-
-            var top = 0d;
-            var left = 0d;
-
-            var index = 0;
-            for (int i = 0; i < rows.Count; i++)
-            {
-                for (int j = 0; j < rows[i].Count; j++)
-                {
-                    if (Children.Count > index)
-                    {
-                        Children[index].Arrange(new Rect(left, top, itemSpans[index] / preferredRowSize * width, lineHeight));
-                    }
-
-                    left += itemSpans[index] / preferredRowSize * width;
-                    index++;
-                }
-
-                top += lineHeight;
-                left = 0;
-            }
-
-            return new Size(finalSize.Width, rows.Count * lineHeight);
+            ViewModel.Stickers.InstallCommand.Execute(((Button)sender).DataContext);
         }
 
-        private double prepareLayout(double viewPortAvailableSize)
+        private async void Stickers_ChoosingGroupHeaderContainer(ListViewBase sender, ChoosingGroupHeaderContainerEventArgs args)
         {
-            itemSpans.Clear();
-            itemsToRow.Clear();
-            int preferredRowSize = Math.Min(getSpanCount(viewPortAvailableSize), 100);
-
-            double totalItemSize = 0;
-            int itemsCount = getFlowItemCount();
-            int[] weights = new int[itemsCount];
-            for (int j = 0; j < itemsCount; j++)
+            if (args.GroupHeaderContainer == null)
             {
-                Size size = sizeForItem(j);
-                totalItemSize += (size.Width / size.Height) * preferredRowSize;
-                weights[j] = (int)Math.Round(size.Width / size.Height * 100);
+                args.GroupHeaderContainer = new GridViewHeaderItem();
+                args.GroupHeaderContainer.Style = Stickers.GroupStyle[0].HeaderContainerStyle;
+                args.GroupHeaderContainer.ContentTemplate = Stickers.GroupStyle[0].HeaderTemplate;
             }
 
-            int numberOfRows = (int)Math.Max(Math.Round(totalItemSize / viewPortAvailableSize), 1);
-
-            rows = getLinearPartitionForSequence(weights, numberOfRows);
-
-            int i = 0, a;
-            for (a = 0; a < rows.Count; a++)
+            if (args.Group is ViewModels.Dialogs.StickerSetViewModel group && !group.IsLoaded)
             {
-                List<int> row = rows[a];
+                group.IsLoaded = true;
 
-                double summedRatios = 0;
-                for (int j = i, n = i + row.Count; j < n; j++)
+                //Debug.WriteLine("Loading sticker set " + group.Id);
+
+                var response = await ViewModel.ProtoService.SendAsync(new GetStickerSet(group.Id));
+                if (response is StickerSet full)
                 {
-                    Size preferredSize = sizeForItem(j);
-                    summedRatios += preferredSize.Width / preferredSize.Height;
+                    group.Update(full, true);
+                    return;
+
+                    foreach (var sticker in group.Stickers)
+                    {
+                        if (sticker.Thumbnail == null)
+                        {
+                            continue;
+                        }
+
+                        var container = Stickers.ContainerFromItem(sticker) as SelectorItem;
+                        if (container == null)
+                        {
+                            continue;
+                        }
+
+                        var content = container.ContentTemplateRoot as Image;
+
+                        container.Tag = sticker;
+                        content.Tag = sticker;
+
+                        var file = sticker.Thumbnail.Photo;
+                        if (file.Local.IsDownloadingCompleted)
+                        {
+                            content.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                        }
+                        else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+                        {
+                            DownloadFile(file.Id, sticker);
+                        }
+                    }
+                }
+            }
+
+            //Debug.WriteLine("Choosing group header container");
+        }
+
+        private void Stickers_ChoosingItemContainer(ListViewBase sender, ChoosingItemContainerEventArgs args)
+        {
+            if (args.ItemContainer == null)
+            {
+                args.ItemContainer = new GridViewItem();
+                args.ItemContainer.Style = Stickers.ItemContainerStyle;
+                args.ItemContainer.ContentTemplate = Stickers.ItemTemplate;
+                args.ItemContainer.ContextRequested += Sticker_ContextRequested;
+            }
+
+            args.IsContainerPrepared = true;
+        }
+
+        private async void Stickers_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            var content = args.ItemContainer.ContentTemplateRoot as Image;
+
+            if (args.InRecycleQueue)
+            {
+                content.Source = null;
+                return;
+            }
+
+            var sticker = args.Item as ViewModels.Dialogs.StickerViewModel;
+
+            args.ItemContainer.Tag = args.Item;
+            args.ItemContainer.Content = args.Item;
+            content.Tag = args.Item;
+
+            if (sticker == null || sticker.Thumbnail == null)
+            {
+                content.Source = null;
+                return;
+            }
+
+            //if (args.Phase < 2)
+            //{
+            //    content.Source = null;
+            //    args.RegisterUpdateCallback(Stickers_ContainerContentChanging);
+            //}
+            //else
+            if (args.Phase == 0)
+            {
+                //Debug.WriteLine("Loading sticker " + sticker.StickerValue.Id + " for sticker set id " + sticker.SetId);
+
+                var file = sticker.Thumbnail.Photo;
+                if (file.Local.IsDownloadingCompleted)
+                {
+                    content.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                }
+                else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+                {
+                    DownloadFile(file.Id, sticker);
+                }
+            }
+            else
+            {
+                throw new System.Exception("We should be in phase 0, but we are not.");
+            }
+
+            args.Handled = true;
+        }
+
+        private void DownloadFile(int id, ViewModels.Dialogs.StickerViewModel sticker)
+        {
+            _stickers[id].Add(sticker);
+            ViewModel.ProtoService.DownloadFile(id, 1);
+        }
+
+        private void DownloadFile(int id, Animation animation)
+        {
+            _animations[id][animation.AnimationValue.Id] = animation;
+            ViewModel.ProtoService.DownloadFile(id, 1);
+        }
+
+        private void Animations_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as MosaicRow;
+            var position = args.Item as MosaicMediaRow;
+
+            content.UpdateLine(ViewModel.ProtoService, position, Mosaic_Click);
+
+            //var content = args.ItemContainer.ContentTemplateRoot as Border;
+            //var position = args.Item as MosaicMediaPosition;
+
+            //var animation = position.Item as Animation;
+            //if (animation == null)
+            //{
+            //    return;
+            //}
+
+            //if (args.Phase < 2)
+            //{
+            //    args.RegisterUpdateCallback(Animations_ContainerContentChanging);
+            //}
+            //else
+            //{
+            //    var file = animation.Thumbnail.Photo;
+            //    if (file.Local.IsDownloadingCompleted)
+            //    {
+            //        content.Background = new ImageBrush { ImageSource = new BitmapImage(new Uri("file:///" + file.Local.Path)), AlignmentX = AlignmentX.Center, AlignmentY = AlignmentY.Center, Stretch = Stretch.UniformToFill };
+            //    }
+            //    else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+            //    {
+            //        DownloadFile(file.Id, animation);
+            //    }
+            //}
+
+            args.Handled = true;
+        }
+
+        private async void Toolbar_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            if (args.Item is ViewModels.Dialogs.SupergroupStickerSetViewModel supergroup)
+            {
+                var chat = ViewModel.CacheService.GetChat(supergroup.ChatId);
+                if (chat == null)
+                {
+                    return;
                 }
 
-                double rowSize = viewPortAvailableSize;
-
-                if (rows.Count == 1 && a == rows.Count - 1)
+                var content = args.ItemContainer.ContentTemplateRoot as ProfilePicture;
+                if (content == null)
                 {
-                    if (row.Count < 2)
-                    {
-                        rowSize = (float)Math.Floor(viewPortAvailableSize / 3.0f);
-                    }
-                    else if (row.Count < 3)
-                    {
-                        rowSize = (float)Math.Floor(viewPortAvailableSize * 2.0f / 3.0f);
-                    }
+                    return;
                 }
 
-                int spanLeft = getSpanCount(viewPortAvailableSize);
-                for (int j = i, n = i + row.Count; j < n; j++)
+                content.Source = PlaceholderHelper.GetChat(ViewModel.ProtoService, chat, 36);
+            }
+            else if (args.Item is ViewModels.Dialogs.StickerSetViewModel sticker)
+            {
+                var content = args.ItemContainer.ContentTemplateRoot as Image;
+                if (content == null || sticker == null || (sticker.Thumbnail == null && sticker.Covers == null))
                 {
-                    Size preferredSize = sizeForItem(j);
-                    int width = (int)Math.Round(rowSize / summedRatios * (preferredSize.Width / preferredSize.Height));
-                    int itemSpan;
-                    if (itemsCount < 3 || j != n - 1)
+                    return;
+                }
+
+                var cover = sticker.Thumbnail ?? sticker.Covers.FirstOrDefault()?.Thumbnail;
+                if (cover == null)
+                {
+                    content.Source = null;
+                    return;
+                }
+
+                var file = cover.Photo;
+                if (file.Local.IsDownloadingCompleted)
+                {
+                    if (sticker.IsAnimated)
                     {
-                        itemSpan = (int)(width / viewPortAvailableSize * getSpanCount(viewPortAvailableSize));
-                        spanLeft -= itemSpan;
+                        var bitmap = PlaceholderHelper.GetLottieFrame(file.Local.Path, 0, 36, 36);
+                        if (bitmap == null)
+                        {
+                            bitmap = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                        }
+
+                        content.Source = bitmap;
                     }
                     else
                     {
-                        itemsToRow[j] = a;
-                        itemSpan = spanLeft;
+                        content.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
                     }
-                    itemSpans[j] = itemSpan;
                 }
-                i += row.Count;
-            }
-
-            return preferredRowSize;
-        }
-
-        private int[] getLinearPartitionTable(int[] sequence, int numPartitions)
-        {
-            int n = sequence.Length;
-            int i, j, x;
-
-            int[] tmpTable = new int[n * numPartitions];
-            int[] solution = new int[(n - 1) * (numPartitions - 1)];
-
-            for (i = 0; i < n; i++)
-            {
-                tmpTable[i * numPartitions] = sequence[i] + (i != 0 ? tmpTable[(i - 1) * numPartitions] : 0);
-            }
-
-            for (j = 0; j < numPartitions; j++)
-            {
-                tmpTable[j] = sequence[0];
-            }
-
-            for (i = 1; i < n; i++)
-            {
-                for (j = 1; j < numPartitions; j++)
+                else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
                 {
-                    int currentMin = 0;
-                    int minX = int.MaxValue;
-
-                    for (x = 0; x < i; x++)
-                    {
-                        int cost = Math.Max(tmpTable[x * numPartitions + (j - 1)], tmpTable[i * numPartitions] - tmpTable[x * numPartitions]);
-                        if (x == 0 || cost < currentMin)
-                        {
-                            currentMin = cost;
-                            minX = x;
-                        }
-                    }
-                    tmpTable[i * numPartitions + j] = currentMin;
-                    solution[(i - 1) * (numPartitions - 1) + (j - 1)] = minX;
+                    //DownloadFile(file.Id, cover);
+                    ViewModel.ProtoService.DownloadFile(file.Id, 1);
                 }
             }
-
-            return solution;
         }
 
-        private List<List<int>> getLinearPartitionForSequence(int[] sequence, int numberOfPartitions)
+        private void FieldStickers_TextChanged(object sender, TextChangedEventArgs e)
         {
-            int n = sequence.Length;
-            int k = numberOfPartitions;
+            ViewModel.Stickers.FindStickers(FieldStickers.Text);
+        }
 
-            if (k <= 0)
+        private void FieldAnimations_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            //ViewModel.Stickers.FindAnimations(FieldAnimations.Text);
+        }
+
+        private void Sticker_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+        {
+            var element = sender as FrameworkElement;
+            var sticker = element.Tag as ViewModels.Dialogs.StickerViewModel;
+
+            var flyout = new MenuFlyout();
+            flyout.CreateFlyoutItem(ViewModel.StickerSendCommand, sticker.Get(), Strings.Resources.SendStickerPreview, new FontIcon { Glyph = Icons.Send, FontFamily = App.Current.Resources["TelegramThemeFontFamily"] as FontFamily });
+            flyout.CreateFlyoutItem(ViewModel.StickerViewCommand, sticker.Get(), Strings.Resources.ViewPackPreview, new FontIcon { Glyph = Icons.Stickers });
+
+            if (ViewModel.ProtoService.IsStickerFavorite(sticker.StickerValue.Id))
             {
-                return new List<List<int>>();
+                flyout.CreateFlyoutItem(ViewModel.StickerUnfaveCommand, sticker.Get(), Strings.Resources.DeleteFromFavorites, new FontIcon { Glyph = Icons.Unfavorite });
+            }
+            else
+            {
+                flyout.CreateFlyoutItem(ViewModel.StickerFaveCommand, sticker.Get(), Strings.Resources.AddToFavorites, new FontIcon { Glyph = Icons.Favorite });
             }
 
-            if (k >= n || n == 1)
-            {
-                List<List<int>> partition = new List<List<int>>(sequence.Length);
-                for (int i = 0; i < sequence.Length; i++)
-                {
-                    List<int> arrayList = new List<int>(1);
-                    arrayList.Add(sequence[i]);
-                    partition.Add(arrayList);
-                }
-                return partition;
-            }
+            args.ShowAt(flyout, element);
+        }
 
-            int[] solution = getLinearPartitionTable(sequence, numberOfPartitions);
-            int solutionRowSize = numberOfPartitions - 1;
+        private void Animation_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+        {
+            var element = sender as FrameworkElement;
+            var position = element.Tag as MosaicMediaPosition;
+            var animation = position.Item as Animation;
 
-            k = k - 2;
-            n = n - 1;
-            List<List<int>> answer = new List<List<int>>();
+            var flyout = new MenuFlyout();
+            flyout.CreateFlyoutItem(ViewModel.AnimationSendCommand, animation, Strings.Resources.SendGifPreview, new FontIcon { Glyph = Icons.Send, FontFamily = App.Current.Resources["TelegramThemeFontFamily"] as FontFamily });
+            flyout.CreateFlyoutItem(ViewModel.AnimationDeleteCommand, animation, Strings.Resources.Delete, new FontIcon { Glyph = Icons.Delete });
 
-            while (k >= 0)
-            {
-                if (n < 1)
-                {
-                    answer.Insert(0, new List<int>());
-                }
-                else
-                {
-                    List<int> currentAnswer1 = new List<int>();
-                    for (int i = solution[(n - 1) * solutionRowSize + k] + 1, range = n + 1; i < range; i++)
-                    {
-                        currentAnswer1.Add(sequence[i]);
-                    }
-                    answer.Insert(0, currentAnswer1);
-                    n = solution[(n - 1) * solutionRowSize + k];
-                }
-                k = k - 1;
-            }
-
-            List<int> currentAnswer = new List<int>();
-            for (int i = 0, range = n + 1; i < range; i++)
-            {
-                currentAnswer.Add(sequence[i]);
-            }
-            answer.Insert(0, currentAnswer);
-            return answer;
+            args.ShowAt(flyout, element);
         }
 
 
 
-
-
-
-
-
-
-
-        private Size sizeForItem(int i)
+        public void UpdateChatPermissions(Chat chat)
         {
-            Size size = getSizeForItem(i);
-            if (size.Width == 0)
-            {
-                size.Width = 100;
-            }
-            if (size.Height == 0)
-            {
-                size.Height = 100;
-            }
-            double aspect = size.Width / size.Height;
-            if (aspect > 4.0f || aspect < 0.6f)
-            {
-                size.Height = size.Width = Math.Max(size.Width, size.Height);
-            }
-            return size;
-        }
+            var stickersRights = ViewModel.VerifyRights(chat, x => x.CanSendOtherMessages, Strings.Resources.GlobalAttachStickersRestricted, Strings.Resources.AttachStickersRestrictedForever, Strings.Resources.AttachStickersRestricted, out string stickersLabel);
+            var animationsRights = ViewModel.VerifyRights(chat, x => x.CanSendOtherMessages, Strings.Resources.GlobalAttachGifRestricted, Strings.Resources.AttachGifRestrictedForever, Strings.Resources.AttachGifRestricted, out string animationsLabel);
 
-        protected Size getSizeForItem(int i)
-        {
-            if (Children[i] is FrameworkElement child)
-            {
-                if (child.DataContext is TLDocument document)
-                {
-                    var size = new Size(100, 100);
-                    if (document.Thumb is TLPhotoSize photoSize)
-                    {
-                        size.Width = photoSize.W;
-                        size.Height = photoSize.H;
-                    }
-                    else if (document.Thumb is TLPhotoCachedSize photoCachedSize)
-                    {
-                        size.Width = photoCachedSize.W;
-                        size.Height = photoCachedSize.H;
-                    }
+            StickersRoot.Visibility = stickersRights ? Visibility.Collapsed : Visibility.Visible;
+            StickersPermission.Visibility = stickersRights ? Visibility.Visible : Visibility.Collapsed;
+            StickersPermission.Text = stickersLabel ?? string.Empty;
 
-                    for (int j = 0; j < document.Attributes.Count; j++)
-                    {
-                        if (document.Attributes[j] is TLDocumentAttributeVideo videoAttribute)
-                        {
-                            size.Width = videoAttribute.W;
-                            size.Height = videoAttribute.H;
-                            break;
-                        }
-                        else if (document.Attributes[j] is TLDocumentAttributeImageSize imageSizeAttribute)
-                        {
-                            size.Width = imageSizeAttribute.W;
-                            size.Height = imageSizeAttribute.H;
-                            break;
-                        }
-                    }
-
-                    return size;
-                }
-            }
-
-            //    TLRPC.Document document = recentGifs.get(i);
-            //    size.width = document.thumb != null && document.thumb.w != 0 ? document.thumb.w : 100;
-            //    size.height = document.thumb != null && document.thumb.h != 0 ? document.thumb.h : 100;
-            //    for (int b = 0; b < document.attributes.size(); b++)
-            //    {
-            //        TLRPC.DocumentAttribute attribute = document.attributes.get(b);
-            //        if (attribute instanceof TLRPC.TL_documentAttributeImageSize || attribute instanceof TLRPC.TL_documentAttributeVideo) {
-            //        size.width = attribute.w;
-            //        size.height = attribute.h;
-            //        break;
-            //    }
-            //}
-            //                return size;
-
-            return new Size(100, 100);
-        }
-
-        protected int getSpanCount(double viewPortAvailableSize)
-        {
-            return (int)(viewPortAvailableSize / 5d);
-        }
-
-        protected int getFlowItemCount()
-        {
-            return Children.Count;
-            //return getItemCount();
+            AnimationsRoot.Visibility = animationsRights ? Visibility.Collapsed : Visibility.Visible;
+            AnimationsPermission.Visibility = animationsRights ? Visibility.Visible : Visibility.Collapsed;
+            AnimationsPermission.Text = animationsLabel ?? string.Empty;
         }
     }
-
 }

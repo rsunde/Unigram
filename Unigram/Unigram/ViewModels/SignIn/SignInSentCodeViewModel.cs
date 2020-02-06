@@ -3,16 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Account;
-using Telegram.Api.TL.Auth;
+using Telegram.Td.Api;
 using Unigram.Common;
 using Unigram.Controls;
+using Unigram.Entities;
+using Unigram.Services;
 using Unigram.Views;
 using Unigram.Views.SignIn;
 using Windows.UI.Popups;
@@ -20,12 +15,10 @@ using Windows.UI.Xaml.Navigation;
 
 namespace Unigram.ViewModels.SignIn
 {
-    public class SignInSentCodeViewModel : UnigramViewModelBase
+    public class SignInSentCodeViewModel : TLViewModelBase
     {
-        private string _phoneNumber;
-
-        public SignInSentCodeViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator)
-            : base(protoService, cacheService, aggregator)
+        public SignInSentCodeViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             SendCommand = new RelayCommand(SendExecute, () => !IsLoading);
             ResendCommand = new RelayCommand(ResendExecute, () => !IsLoading);
@@ -33,28 +26,27 @@ namespace Unigram.ViewModels.SignIn
 
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            var param = parameter as SignInSentCodePage.NavigationParameters;
-            if (param != null)
+            var authState = ProtoService.GetAuthorizationState();
+            if (authState is AuthorizationStateWaitCode waitCode)
             {
-                _phoneNumber = param.PhoneNumber;
-                _sentCode = param.Result;
+                _codeInfo = waitCode.CodeInfo;
 
-                RaisePropertyChanged(() => SentCode);
+                RaisePropertyChanged(() => CodeInfo);
             }
 
             return Task.CompletedTask;
         }
 
-        private TLAuthSentCode _sentCode;
-        public TLAuthSentCode SentCode
+        private AuthenticationCodeInfo _codeInfo;
+        public AuthenticationCodeInfo CodeInfo
         {
             get
             {
-                return _sentCode;
+                return _codeInfo;
             }
             set
             {
-                Set(ref _sentCode, value);
+                Set(ref _codeInfo, value);
             }
         }
 
@@ -71,11 +63,11 @@ namespace Unigram.ViewModels.SignIn
 
                 var length = 5;
 
-                if (_sentCode != null && _sentCode.Type is TLAuthSentCodeTypeApp appType)
+                if (_codeInfo != null && _codeInfo.Type is AuthenticationCodeTypeTelegramMessage appType)
                 {
                     length = appType.Length;
                 }
-                else if (_sentCode != null && _sentCode.Type is TLAuthSentCodeTypeSms smsType)
+                else if (_codeInfo != null && _codeInfo.Type is AuthenticationCodeTypeSms smsType)
                 {
                     length = smsType.Length;
                 }
@@ -87,132 +79,100 @@ namespace Unigram.ViewModels.SignIn
             }
         }
 
+        public string PhoneNumber
+        {
+            get
+            {
+                return _codeInfo?.PhoneNumber;
+            }
+        }
+
         public RelayCommand SendCommand { get; }
         private async void SendExecute()
         {
-            if (_sentCode == null)
+            if (_codeInfo == null)
             {
                 //...
                 return;
             }
 
-            if (_phoneCode == null)
+            if (string.IsNullOrEmpty(_phoneCode))
             {
-                await TLMessageDialog.ShowAsync("Please enter your code.", "Warning", "OK");
+                RaisePropertyChanged("SENT_CODE_INVALID");
                 return;
             }
 
-            var phoneNumber = _phoneNumber;
-            var phoneCodeHash = _sentCode.PhoneCodeHash;
-
             IsLoading = true;
 
-            var response = await ProtoService.SignInAsync(phoneNumber, phoneCodeHash, _phoneCode);
-            if (response.IsSucceeded)
-            {
-                ProtoService.SetInitState();
-                ProtoService.CurrentUserId = response.Result.User.Id;
-                SettingsHelper.IsAuthorized = true;
-                SettingsHelper.UserId = response.Result.User.Id;
-
-                // TODO: maybe ask about notifications?
-
-                NavigationService.Navigate(typeof(MainPage));
-            }
-            else
+            var response = await ProtoService.SendAsync(new CheckAuthenticationCode(_phoneCode));
+            if (response is Error error)
             {
                 IsLoading = false;
 
-                if (response.Error.TypeEquals(TLErrorType.PHONE_NUMBER_UNOCCUPIED))
+                if (error.TypeEquals(ErrorType.PHONE_NUMBER_INVALID))
                 {
-                    //var signup = await ProtoService.SignUpAsync(phoneNumber, phoneCodeHash, PhoneCode, "Paolo", "Veneziani");
-                    //if (signup.IsSucceeded)
-                    //{
-                    //    ProtoService.SetInitState();
-                    //    ProtoService.CurrentUserId = signup.Value.User.Id;
-                    //    SettingsHelper.IsAuthorized = true;
-                    //    SettingsHelper.UserId = signup.Value.User.Id;
-                    //}
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.InvalidPhoneNumber, Strings.Resources.OK);
+                }
+                else if (error.TypeEquals(ErrorType.PHONE_CODE_EMPTY) || error.TypeEquals(ErrorType.PHONE_CODE_INVALID))
+                {
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.InvalidCode, Strings.Resources.OK);
+                }
+                else if (error.TypeEquals(ErrorType.PHONE_CODE_EXPIRED))
+                {
+                    NavigationService.GoBack();
+                    NavigationService.Frame.ForwardStack.Clear();
 
-                    //this._callTimer.Stop();
-                    //this.StateService.ClearNavigationStack = true;
-                    //this.NavigationService.UriFor<SignUpViewModel>().Navigate();
-                    var state = new SignUpPage.NavigationParameters
-                    {
-                        PhoneNumber = _phoneNumber,
-                        PhoneCode = _phoneCode,
-                        Result = _sentCode,
-                    };
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.CodeExpired, Strings.Resources.OK);
+                }
+                else if (error.TypeEquals(ErrorType.FIRSTNAME_INVALID))
+                {
+                    NavigationService.GoBack();
+                    NavigationService.Frame.ForwardStack.Clear();
 
-                    NavigationService.Navigate(typeof(SignUpPage), state);
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.InvalidFirstName, Strings.Resources.OK);
                 }
-                else if (response.Error.TypeEquals(TLErrorType.PHONE_CODE_INVALID))
+                else if (error.TypeEquals(ErrorType.LASTNAME_INVALID))
                 {
-                    //await new MessageDialog(Resources.PhoneCodeInvalidString, Resources.Error).ShowAsync();
-                }
-                else if (response.Error.TypeEquals(TLErrorType.PHONE_CODE_EMPTY))
-                {
-                    //await new MessageDialog(Resources.PhoneCodeEmpty, Resources.Error).ShowAsync();
-                }
-                else if (response.Error.TypeEquals(TLErrorType.PHONE_CODE_EXPIRED))
-                {
-                    //await new MessageDialog(Resources.PhoneCodeExpiredString, Resources.Error).ShowAsync();
-                }
-                else if (response.Error.TypeEquals(TLErrorType.SESSION_PASSWORD_NEEDED))
-                {
-                    //this.IsWorking = true;
-                    var password = await ProtoService.GetPasswordAsync();
-                    if (password.IsSucceeded && password.Result is TLAccountPassword)
-                    {
-                        var state = new SignInPasswordPage.NavigationParameters
-                        {
-                            PhoneNumber = _phoneNumber,
-                            PhoneCode = _phoneCode,
-                            Result = _sentCode,
-                            Password = password.Result as TLAccountPassword
-                        };
+                    NavigationService.GoBack();
+                    NavigationService.Frame.ForwardStack.Clear();
 
-                        NavigationService.Navigate(typeof(SignInPasswordPage), state);
-                    }
-                    else
-                    {
-                        Execute.ShowDebugMessage("account.getPassword error " + password.Error);
-                    }
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.InvalidLastName, Strings.Resources.OK);
                 }
-                else if (response.Error.CodeEquals(TLErrorCode.FLOOD))
+                else if (error.Message.StartsWith("FLOOD_WAIT"))
                 {
-                    //await new MessageDialog($"{Resources.FloodWaitString}\r\n\r\n({error.Message})", Resources.Error).ShowAsync();
+                    await TLMessageDialog.ShowAsync(Strings.Resources.FloodWait, Strings.Resources.AppName, Strings.Resources.OK);
+                }
+                else if (error.Code != -1000)
+                {
+                    await TLMessageDialog.ShowAsync(error.Message, Strings.Resources.AppName, Strings.Resources.OK);
                 }
 
-                Execute.ShowDebugMessage("account.signIn error " + response.Error);
+                Logs.Logger.Error(Logs.Target.API, "account.signIn error " + error);
             }
         }
 
         public RelayCommand ResendCommand { get; }
         private async void ResendExecute()
         {
-            if (_sentCode == null)
+            if (_codeInfo == null)
             {
                 //...
                 return;
             }
 
-            if (_sentCode.HasNextType)
+            if (_codeInfo.NextType == null)
             {
-                IsLoading = true;
+                return;
+            }
 
-                var response = await ProtoService.ResendCodeAsync(_phoneNumber, _sentCode.PhoneCodeHash);
-                if (response.IsSucceeded)
-                {
-                    if (response.Result.Type is TLAuthSentCodeTypeSms || response.Result.Type is TLAuthSentCodeTypeApp)
-                    {
-                        NavigationService.Navigate(typeof(SignInSentCodePage), new SignInSentCodePage.NavigationParameters
-                        {
-                            PhoneNumber = _phoneNumber,
-                            Result = response.Result
-                        });
-                    }
-                }
+            IsLoading = true;
+
+            var function = new ResendAuthenticationCode();
+
+            var response = await ProtoService.SendAsync(function);
+            if (response is Error error)
+            {
+                
             }
         }
     }

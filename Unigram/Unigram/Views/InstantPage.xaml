@@ -1,13 +1,15 @@
-﻿<Page
+<Page
     x:Class="Unigram.Views.InstantPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Unigram.Views"
     xmlns:controls="using:Unigram.Controls"
-    xmlns:tl="using:Telegram.Api.TL"
+    xmlns:microsoft="using:Microsoft.UI.Xaml.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d">
+    mc:Ignorable="d"
+    Loaded="OnLoaded"
+    Unloaded="OnUnloaded">
 
     <Page.Resources>
         <Style x:Key="EmptyButtonStyle" TargetType="Button">
@@ -62,20 +64,33 @@
             </Setter>
         </Style>
 
-        <Style x:Key="AuthorDateBlockStyle" TargetType="TextBlock">
+        <Style x:Key="BlockAuthorDateTextBlockStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
             <Setter Property="Foreground" Value="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}"/>
-            <Setter Property="FontSize" Value="14"/>
+            <!--<Setter Property="FontSize" Value="14"/>-->
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
 
-        <Style x:Key="AuthorDateTextBlockStyle" TargetType="TextBlock">
+        <Style x:Key="BlockHeaderTextBlockStyle" TargetType="RichTextBlock" BasedOn="{StaticResource BodyRichTextBlockStyle}">
+            <Setter Property="FontSize" Value="24"/>
+            <Setter Property="FontFamily" Value="Times New Roman"/>
+        </Style>
+
+        <Style x:Key="BlockSubheaderTextBlockStyle" TargetType="RichTextBlock" BasedOn="{StaticResource BodyRichTextBlockStyle}">
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontFamily" Value="Times New Roman"/>
+        </Style>
+
+        <Style x:Key="BlockBodyTextBlockStyle" TargetType="RichTextBlock" BasedOn="{StaticResource BodyRichTextBlockStyle}">
+            <Setter Property="FontSize" Value="{ThemeResource MessageFontSize}"/>
+            <!--<Setter Property="Foreground" Value="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}"/>-->
+        </Style>
+
+        <Style x:Key="BlockCaptionTextBlockStyle" TargetType="RichTextBlock" BasedOn="{StaticResource CaptionRichTextBlockStyle}">
             <Setter Property="Foreground" Value="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
 
         <Style x:Key="BlockPreformattedStyle" TargetType="StackPanel">
-            <Setter Property="Background" Value="{ThemeResource CommandBarOverflowPresenterBackground}"/>
+            <Setter Property="Background" Value="{ThemeResource PageSubHeaderBackgroundBrush}"/>
             <Setter Property="Padding" Value="12,8,0,8"/>
         </Style>
 
@@ -87,46 +102,59 @@
         <Style x:Key="BlockBlockquoteStyle" TargetType="StackPanel">
             <Setter Property="BorderBrush" Value="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
             <Setter Property="BorderThickness" Value="2,0,0,0"/>
-            <Setter Property="Padding" Value="12,0,0,0"/>
+            <Setter Property="Padding" Value="12,0,0,2"/>
         </Style>
 
         <Style x:Key="BlockPullquoteStyle" TargetType="StackPanel"/>
-        <Style x:Key="BlockPhotoStyle" TargetType="StackPanel"/>
-        <Style x:Key="BlockVideoStyle" TargetType="StackPanel"/>
+        <Style x:Key="BlockPhotoStyle" TargetType="StackPanel">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="BlockVideoStyle" TargetType="StackPanel">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
         <Style x:Key="BlockEmbedStyle" TargetType="StackPanel"/>
-        <Style x:Key="BlockSlideshowStyle" TargetType="StackPanel"/>
+        <Style x:Key="BlockSlideshowStyle" TargetType="StackPanel">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
         <Style x:Key="BlockCollageStyle" TargetType="StackPanel"/>
 
         <Style x:Key="BlockEmbedPostStyle" TargetType="StackPanel">
             <Setter Property="BorderBrush" Value="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
             <Setter Property="BorderThickness" Value="2,0,0,0"/>
         </Style>
-        
-        <DataTemplate x:Key="ChannelItemTemplate" x:DataType="tl:TLChannel">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="{x:Bind DisplayName}" VerticalAlignment="Center" Padding="12,10"/>
 
-                <Button Content="JOIN"
-                        Visibility="{x:Bind Converter={StaticResource ChannelJoinedToVisibilityConverter}, ConverterParameter=invert}"
-                        Foreground="{ThemeResource SystemControlBackgroundAccentBrush}"
-                        Background="Transparent"
-                        Padding="12,8"
-                        Grid.Column="1"/>
-                <FontIcon Visibility="{x:Bind Converter={StaticResource ChannelJoinedToVisibilityConverter}}"
-                          Foreground="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}"
-                          HorizontalAlignment="Right"
-                          Margin="12,0"
-                          Glyph="&#xE10B;"
-                          Grid.Column="1"/>
-            </Grid>
-        </DataTemplate>
+        <Style x:Key="BlockRelatedArticlesHeaderPanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource PageSubHeaderBackgroundBrush}"/>
+            <Setter Property="Margin" Value="-12,0"/>
+            <Setter Property="Padding" Value="12,8"/>
+        </Style>
+        <Style x:Key="BlockRelatedArticlesHeaderStyle" TargetType="RichTextBlock" BasedOn="{StaticResource BaseRichTextBlockStyle}"/>
+
+        <!--<DataTemplate x:Key="ChannelItemTemplate" x:DataType="tl:TLChannel">
+             <Grid>
+             <Grid.ColumnDefinitions>
+             <ColumnDefinition/>
+             <ColumnDefinition Width="Auto"/>
+             </Grid.ColumnDefinitions>
+             <TextBlock Text="{x:Bind DisplayName}" VerticalAlignment="Center" Padding="12,10"/>
+             
+             <Button Content="JOIN"
+             Visibility="{x:Bind Converter={StaticResource ChannelJoinedToVisibilityConverter}, ConverterParameter=invert}"
+             Foreground="{ThemeResource SystemControlBackgroundAccentBrush}"
+             Background="Transparent"
+             Padding="12,8"
+             Grid.Column="1"/>
+             <FontIcon Visibility="{x:Bind Converter={StaticResource ChannelJoinedToVisibilityConverter}}"
+             Foreground="{ThemeResource SystemControlDisabledChromeDisabledLowBrush}"
+             HorizontalAlignment="Right"
+             Margin="12,0"
+             Glyph="&#xE10B;"
+             Grid.Column="1"/>
+             </Grid>
+             </DataTemplate>-->
 
         <Style x:Key="ChannelBlockStyle" BasedOn="{StaticResource EmptyButtonStyle}" TargetType="Button">
-            <Setter Property="Background" Value="{ThemeResource TelegramBackgroundSubtitleBarBrush}"/>
+            <Setter Property="Background" Value="{ThemeResource PageSubHeaderBackgroundBrush}"/>
             <Setter Property="ContentTemplate" Value="{StaticResource ChannelItemTemplate}"/>
         </Style>
 
@@ -142,10 +170,59 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition/>
         </Grid.RowDefinitions>
-        <controls:ButtonPageHeader Command="{x:Bind ViewModel.ShareCommand}" Glyph="&#xE72D;"/>
+        <controls:ContentPageHeader IsLoading="{x:Bind ViewModel.IsLoading, Mode=OneWay}">
+            <Grid Margin="-28,0,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <microsoft:ProgressBar x:Name="Reading" VerticalAlignment="Stretch" Background="Transparent" Foreground="{ThemeResource SystemControlBackgroundBaseLowBrush}" Grid.ColumnSpan="3"/>
+
+                <TextBlock Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                           VerticalAlignment="Center"
+                           Margin="40,0,0,0"
+                           Foreground="{ThemeResource PageHeaderForegroundBrush}"
+                           Style="{StaticResource BaseTextBlockStyle}"/>
+
+                <controls:GlyphButton
+                     Glyph="&#xE72D;"
+                     Command="{x:Bind ViewModel.ShareCommand}"
+                     Style="{StaticResource HeaderGlyphButtonStyle}"
+                     Grid.Column="1"/>
+                <Button Foreground="{ThemeResource PageHeaderForegroundBrush}"
+                        Padding="{StaticResource EllipsisButtonPadding}"
+                        Style="{StaticResource EllipsisButton}"
+                        AutomationProperties.Name="{CustomResource AccDescrMoreOptions}"
+                        ToolTipService.ToolTip="{CustomResource AccDescrMoreOptions}"
+                        Grid.Column="2">
+                    <Button.Flyout>
+                        <MenuFlyout x:Name="EllipsisFlyout">
+                            <MenuFlyoutItem Command="{x:Bind ViewModel.BrowserCommand}" Text="{CustomResource OpenInExternalApp}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE7AC;"/>
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem Command="{x:Bind ViewModel.CopyCommand}" Text="{CustomResource CopyLink}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE8C8;"/>
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                    <FontIcon x:Name="EllipsisIcon"
+                              VerticalAlignment="Center"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                              FontSize="16"
+                              Glyph="&#xE10C;"
+                              Height="{ThemeResource AppBarExpandButtonCircleDiameter}" />
+                </Button>
+            </Grid>
+        </controls:ContentPageHeader>
+
 
         <ListView x:Name="ScrollingHost"
-                  Background="{ThemeResource TelegramBackgroundTitlebarBrush}"
+                  Background="{ThemeResource PageHeaderBackgroundBrush}"
                   SelectionMode="None"
                   Grid.Row="1">
             <ListView.ItemContainerStyle>
@@ -168,8 +245,14 @@
                 </ItemsPanelTemplate>
             </ListView.ItemsPanel>
             <ListView.Footer>
-                <Border Background="{ThemeResource TelegramBackgroundTitlebarBrush}">
-                    <Button Command="{x:Bind ViewModel.FeedbackCommand}" Content="Leave feedback about this preview" HorizontalContentAlignment="Center" VerticalAlignment="Center" Padding="8,6" Style="{StaticResource EmptyButtonStyle}"/>
+                <Border Background="{ThemeResource PageHeaderBackgroundBrush}">
+                    <Button
+                        Command="{x:Bind ViewModel.FeedbackCommand}"
+                        Content="{CustomResource PreviewFeedback}"
+                        HorizontalContentAlignment="Center"
+                        VerticalAlignment="Center"
+                        Padding="8,6"
+                        Style="{StaticResource EmptyButtonStyle}"/>
                 </Border>
             </ListView.Footer>
             <ListView.ItemContainerTransitions>
@@ -178,7 +261,7 @@
         </ListView>
 
         <!--<ScrollViewer x:Name="ScrollingHost"
-             Background="{ThemeResource TelegramBackgroundTitlebarBrush}"
+             Background="{ThemeResource PageHeaderBackgroundBrush}"
              VerticalScrollBarVisibility="Auto"
              VerticalScrollMode="Auto"
              Grid.Row="1">
@@ -189,7 +272,7 @@
              </Grid.RowDefinitions>
              <StackPanel x:Name="LayoutRoot" Margin="0,0,0,20"/>
              
-             <Border Background="{ThemeResource TelegramBackgroundTitlebarBrush}" Grid.Row="1">
+             <Border Background="{ThemeResource PageHeaderBackgroundBrush}" Grid.Row="1">
              <Button Command="{x:Bind ViewModel.FeedbackCommand}" Content="Leave feedback about this preview" HorizontalContentAlignment="Center" VerticalAlignment="Center" Padding="8,6" Style="{StaticResource EmptyButtonStyle}"/>
              </Border>
              </Grid>

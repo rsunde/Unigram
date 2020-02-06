@@ -3,70 +3,75 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
 using Unigram.Converters;
+using Unigram.ViewModels;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 
 namespace Unigram.Controls
 {
-    public class PaddedListView : SelectListView
+    public class PaddedListView : LazoListView
     {
         protected override void PrepareContainerForItemOverride(DependencyObject element, object item)
         {
-            var bubble = element as ListViewItem;
-            var messageCommon = item as TLMessageCommonBase;
+            var container = element as ListViewItem;
+            var message = item as MessageViewModel;
 
-            if (bubble != null && messageCommon != null)
+            if (container != null && message != null)
             {
-                if (messageCommon.IsService())
+                var chat = message.GetChat();
+                var action = message.IsSaved() || message.IsShareable();
+
+                if (message.IsService())
                 {
-                    bubble.Padding = new Thickness(12, 0, 12, 0);
+                    container.Padding = new Thickness(12, 0, 12, 0);
+
+                    container.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    container.Width = double.NaN;
+                    container.Height = double.NaN;
+                    container.Margin = new Thickness();
                 }
-                else
+                else if (message.IsSaved() || (chat.Type is ChatTypeBasicGroup || chat.Type is ChatTypeSupergroup) && !message.IsChannelPost)
                 {
-                    var message = item as TLMessage;
-                    if (message != null && message.ToId is TLPeerChat || message.ToId is TLPeerChannel && !message.IsPost)
+                    if (message.IsOutgoing && !message.IsSaved())
                     {
-                        if (message.IsOut)
+                        if (message.Content is MessageSticker || message.Content is MessageVideoNote)
                         {
-                            if (message.IsSticker())
-                            {
-                                bubble.Padding = new Thickness(12, 0, 12, 0);
-                            }
-                            else
-                            {
-                                bubble.Padding = new Thickness(52, 0, 12, 0);
-                            }
+                            container.Padding = new Thickness(12, 0, 12, 0);
                         }
                         else
                         {
-                            if (message.IsSticker())
-                            {
-                                bubble.Padding = new Thickness(52, 0, 12, 0);
-                            }
-                            else
-                            {
-                                bubble.Padding = new Thickness(52, 0, MessageToShareConverter.Convert(message) ? 12 : 52, 0);
-                            }
+                            container.Padding = new Thickness(50, 0, 12, 0);
                         }
                     }
                     else
                     {
-                        if (message.IsSticker())
+                        if (message.Content is MessageSticker || message.Content is MessageVideoNote)
                         {
-                            bubble.Padding = new Thickness(12, 0, 12, 0);
+                            container.Padding = new Thickness(12, 0, 12, 0);
                         }
                         else
                         {
-                            if (message.IsOut && !message.IsPost)
-                            {
-                                bubble.Padding = new Thickness(52, 0, 12, 0);
-                            }
-                            else
-                            {
-                                bubble.Padding = new Thickness(12, 0, MessageToShareConverter.Convert(message) ? 12 : 52, 0);
-                            }
+                            container.Padding = new Thickness(12, 0, action ? 14 : 50, 0);
+                        }
+                    }
+                }
+                else
+                {
+                    if (message.Content is MessageSticker || message.Content is MessageVideoNote)
+                    {
+                        container.Padding = new Thickness(12, 0, 12, 0);
+                    }
+                    else
+                    {
+                        if (message.IsOutgoing && !message.IsChannelPost)
+                        {
+                            container.Padding = new Thickness(50, 0, 12, 0);
+                        }
+                        else
+                        {
+                            container.Padding = new Thickness(12, 0, action ? 14 : 50, 0);
                         }
                     }
                 }

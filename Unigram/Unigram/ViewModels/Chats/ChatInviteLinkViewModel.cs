@@ -3,41 +3,37 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
 using Unigram.Common;
 using Unigram.Controls;
+using Unigram.Services;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
 
 namespace Unigram.ViewModels.Chats
 {
-    public class ChatInviteLinkViewModel : UnigramViewModelBase
+    public class ChatInviteLinkViewModel : TLViewModelBase,
+        IHandle<UpdateBasicGroupFullInfo>,
+        IHandle<UpdateSupergroupFullInfo>
     {
-        private TLPeerBase _peer;
-        private TLExportedChatInviteBase _exportedInvite;
-
-        public ChatInviteLinkViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator)
-            : base(protoService, cacheService, aggregator)
+        public ChatInviteLinkViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             CopyCommand = new RelayCommand(CopyExecute);
             RevokeCommand = new RelayCommand(RevokeExecute);
         }
 
-        private TLChatBase _item;
-        public TLChatBase Item
+        protected Chat _chat;
+        public Chat Chat
         {
             get
             {
-                return _item;
+                return _chat;
             }
             set
             {
-                Set(ref _item, value);
+                Set(ref _chat, value);
             }
         }
 
@@ -54,96 +50,96 @@ namespace Unigram.ViewModels.Chats
             }
         }
 
-        public override async Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
+        public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            Task<MTProtoResponse<TLExportedChatInviteBase>> task = null;
+            var chatId = (long)parameter;
 
-            if (parameter is TLPeerChannel peerChannel)
+            Chat = ProtoService.GetChat(chatId);
+
+            var chat = _chat;
+            if (chat == null)
             {
-                _peer = peerChannel;
-
-                var channel = CacheService.GetChat(peerChannel.ChannelId) as TLChannel;
-                if (channel != null)
-                {
-                    Item = channel;
-
-                    var full = CacheService.GetFullChat(channel.Id) as TLChannelFull;
-                    if (full == null)
-                    {
-                        var response = await ProtoService.GetFullChannelAsync(channel.ToInputChannel());
-                        if (response.IsSucceeded)
-                        {
-                            full = response.Result.FullChat as TLChannelFull;
-                        }
-                    }
-
-                    if (full != null)
-                    {
-                        _exportedInvite = full.ExportedInvite;
-
-                        if (full.ExportedInvite is TLChatInviteExported invite)
-                        {
-                            InviteLink = invite.Link;
-                        }
-                        else
-                        {
-                            task = ProtoService.ExportInviteAsync(channel.ToInputChannel());
-                        }
-                    }
-                }
-            }
-            else if (parameter is TLPeerChat peerChat)
-            {
-                _peer = peerChat;
-
-                var chat = CacheService.GetChat(peerChat.ChatId) as TLChat;
-                if (chat != null)
-                {
-                    Item = chat;
-
-                    var full = CacheService.GetFullChat(chat.Id) as TLChannelFull;
-                    if (full == null)
-                    {
-                        var response = await ProtoService.GetFullChatAsync(chat.Id);
-                        if (response.IsSucceeded)
-                        {
-                            full = response.Result.FullChat as TLChannelFull;
-                        }
-                    }
-
-                    if (full != null)
-                    {
-                        _exportedInvite = full.ExportedInvite;
-
-                        if (full.ExportedInvite is TLChatInviteExported invite)
-                        {
-                            InviteLink = invite.Link;
-                        }
-                        else
-                        {
-                            task = ProtoService.ExportChatInviteAsync(chat.Id);
-                        }
-                    }
-                }
+                return Task.CompletedTask;
             }
 
-            if (task != null)
-            {
-                var response = await task;
-                if (response.IsSucceeded)
-                {
-                    _exportedInvite = response.Result;
+            Aggregator.Subscribe(this);
+            //Delegate?.UpdateChat(chat);
 
-                    var invite = response.Result as TLChatInviteExported;
-                    if (invite != null && !string.IsNullOrEmpty(invite.Link))
-                    {
-                        InviteLink = invite.Link;
-                    }
+            if (chat.Type is ChatTypeBasicGroup basic)
+            {
+                var item = ProtoService.GetBasicGroup(basic.BasicGroupId);
+                var cache = ProtoService.GetBasicGroupFull(basic.BasicGroupId);
+
+                //Delegate?.UpdateBasicGroup(chat, item);
+
+                if (cache == null)
+                {
+                    ProtoService.Send(new GetBasicGroupFullInfo(basic.BasicGroupId));
                 }
                 else
                 {
-                    Execute.ShowDebugMessage("channels.exportInvite error " + response.Error);
+                    //Delegate?.UpdateBasicGroupFullInfo(chat, item, cache);
+                    UpdateInviteLink(chat, cache.InviteLink);
                 }
+            }
+            else if (chat.Type is ChatTypeSupergroup super)
+            {
+                var item = ProtoService.GetSupergroup(super.SupergroupId);
+                var cache = ProtoService.GetSupergroupFull(super.SupergroupId);
+
+                //Delegate?.UpdateSupergroup(chat, item);
+
+                if (cache == null)
+                {
+                    ProtoService.Send(new GetSupergroupFullInfo(super.SupergroupId));
+                }
+                else
+                {
+                    //Delegate?.UpdateSupergroupFullInfo(chat, item, cache);
+                    UpdateInviteLink(chat, cache.InviteLink);
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public void Handle(UpdateBasicGroupFullInfo update)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            if (chat.Type is ChatTypeBasicGroup basic && basic.BasicGroupId == update.BasicGroupId)
+            {
+                BeginOnUIThread(() => UpdateInviteLink(chat, update.BasicGroupFullInfo.InviteLink));
+            }
+        }
+
+        public void Handle(UpdateSupergroupFullInfo update)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            if (chat.Type is ChatTypeSupergroup super && super.SupergroupId == update.SupergroupId)
+            {
+                BeginOnUIThread(() => UpdateInviteLink(chat, update.SupergroupFullInfo.InviteLink));
+            }
+        }
+
+        private void UpdateInviteLink(Chat chat, string inviteLink)
+        {
+            if (string.IsNullOrEmpty(inviteLink))
+            {
+                ProtoService.Send(new GenerateChatInviteLink(chat.Id));
+            }
+            else
+            {
+                InviteLink = inviteLink;
             }
         }
 
@@ -154,55 +150,25 @@ namespace Unigram.ViewModels.Chats
             dataPackage.SetText(_inviteLink);
             ClipboardEx.TrySetContent(dataPackage);
 
-            await new TLMessageDialog("Link copied to clipboard").ShowQueuedAsync();
+            await TLMessageDialog.ShowAsync(Strings.Resources.LinkCopied, Strings.Resources.AppName, Strings.Resources.OK);
         }
 
         public RelayCommand RevokeCommand { get; }
         private async void RevokeExecute()
         {
-            var confirm = await TLMessageDialog.ShowAsync("Are you sure you want to revoke this link? Once you do, no one will be able to join the group using it.", "Telegram", "Revoke", "Cancel");
-            if (confirm == ContentDialogResult.Primary)
+            var chat = _chat;
+            if (chat == null)
             {
-                Task<MTProtoResponse<TLExportedChatInviteBase>> task = null;
-
-                if (_peer is TLPeerChannel peerChannel)
-                {
-                    var channel = CacheService.GetChat(peerChannel.ChannelId) as TLChannel;
-                    if (channel != null)
-                    {
-                        task = ProtoService.ExportInviteAsync(channel.ToInputChannel());
-                    }
-                }
-                else if (_peer is TLPeerChat peerChat)
-                {
-                    var chat = CacheService.GetChat(peerChat.ChatId) as TLChat;
-                    if (chat != null)
-                    {
-                        task = ProtoService.ExportChatInviteAsync(chat.Id);
-                    }
-                }
-
-                if (task != null)
-                {
-                    var response = await task;
-                    if (response.IsSucceeded)
-                    {
-                        _exportedInvite = response.Result;
-
-                        var invite = response.Result as TLChatInviteExported;
-                        if (invite != null && !string.IsNullOrEmpty(invite.Link))
-                        {
-                            InviteLink = invite.Link;
-
-                            await TLMessageDialog.ShowAsync("The previous invite link is now inactive. A new invite link has just been generated.", "Telegram", "OK");
-                        }
-                    }
-                    else
-                    {
-                        Execute.ShowDebugMessage("channels.exportInvite error " + response.Error);
-                    }
-                }
+                return;
             }
+
+            var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.RevokeAlert, Strings.Resources.RevokeLink, Strings.Resources.RevokeButton, Strings.Resources.Cancel);
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            ProtoService.Send(new GenerateChatInviteLink(chat.Id));
         }
     }
 }

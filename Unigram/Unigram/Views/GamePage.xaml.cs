@@ -3,14 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
+using System.Threading.Tasks;
+using Telegram.Td.Api;
 using Template10.Services.SerializationService;
 using Unigram.Common;
 using Unigram.Controls.Views;
-using Unigram.Core.Services;
-using Unigram.Tasks;
+using Unigram.Services;
+using Unigram.Native;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.UI.Xaml;
@@ -25,7 +24,7 @@ namespace Unigram.Views
 {
     public sealed partial class GamePage : Page
     {
-        private TLMessage _shareMessage;
+        private Message _shareMessage;
 
         public GamePage()
         {
@@ -34,24 +33,36 @@ namespace Unigram.Views
 
         protected override void OnNavigatedTo(NavigationEventArgs e)
         {
-            var buffer = TLSerializationService.Current.Deserialize((string)e.Parameter) as byte[];
-            if (buffer != null)
+            var bundle = TLSerializationService.Current.Deserialize((string)e.Parameter) as TdBundle;
+            if (bundle == null)
             {
-                using (var from = new TLBinaryReader(buffer))
-                {
-                    var tuple = new TLTuple<string, string, string, TLMessage>(from);
-
-                    _shareMessage = tuple.Item4;
-
-                    TitleLabel.Text = tuple.Item1;
-                    UsernameLabel.Text = "@" + tuple.Item2;
-
-                    TitleLabel.Visibility = string.IsNullOrWhiteSpace(tuple.Item1) ? Visibility.Collapsed : Visibility.Visible;
-                    UsernameLabel.Visibility = string.IsNullOrWhiteSpace(tuple.Item2) ? Visibility.Collapsed : Visibility.Visible;
-
-                    View.Navigate(new Uri(tuple.Item3));
-                }
+                return;
             }
+
+            bundle.TryGetValue("title", out string title);
+            bundle.TryGetValue("username", out string username);
+
+            bundle.TryGetValue("url", out string url);
+
+            bundle.TryGetValue("message", out long messageId);
+            bundle.TryGetValue("chat", out long chatId);
+
+            _shareMessage = new Message { ChatId = chatId, Id = messageId };
+
+            //using (var from = TLObjectSerializer.CreateReader(buffer.AsBuffer()))
+            //{
+            //    var tuple = new TLTuple<string, string, string, TLMessage>(from);
+
+            //    _shareMessage = tuple.Item4;
+
+            TitleLabel.Text = title ?? string.Empty;
+            UsernameLabel.Text = "@" + (username ?? string.Empty);
+
+            TitleLabel.Visibility = string.IsNullOrWhiteSpace(title) ? Visibility.Collapsed : Visibility.Visible;
+            UsernameLabel.Visibility = string.IsNullOrWhiteSpace(username) ? Visibility.Collapsed : Visibility.Visible;
+
+            View.Navigate(new Uri(url));
+            //}
         }
 
         protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -61,7 +72,7 @@ namespace Unigram.Views
 
         private async void Share_Click(object sender, RoutedEventArgs e)
         {
-            await ShareView.Current.ShowAsync(_shareMessage);
+            await ShareView.GetForCurrentView().ShowAsync(_shareMessage);
         }
 
         private void View_NavigationStarting(WebView sender, WebViewNavigationStartingEventArgs args)
@@ -70,7 +81,7 @@ namespace Unigram.Views
             {
                 this.BeginOnUIThread(async () =>
                 {
-                    await ShareView.Current.ShowAsync(_shareMessage, withMyScore);
+                    await ShareView.GetForCurrentView().ShowAsync(_shareMessage, withMyScore);
                 });
             }));
         }

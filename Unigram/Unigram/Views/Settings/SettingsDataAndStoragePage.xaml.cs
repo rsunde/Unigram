@@ -1,14 +1,15 @@
-﻿using System;
+﻿using libtgvoip;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.TL;
-using Telegram.Api.Transport;
+using System.Text;
+using Telegram.Td.Api;
 using Unigram.Common;
 using Unigram.Controls.Views;
+using Unigram.Converters;
+using Unigram.Services.Settings;
 using Unigram.ViewModels.Settings;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
@@ -29,7 +30,7 @@ namespace Unigram.Views.Settings
         public SettingsDataAndStoragePage()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<SettingsDataAndStorageViewModel>();
+            DataContext = TLContainer.Current.Resolve<SettingsDataAndStorageViewModel>();
         }
 
         private void Storage_Click(object sender, RoutedEventArgs e)
@@ -39,37 +40,112 @@ namespace Unigram.Views.Settings
 
         private void Stats_Click(object sender, RoutedEventArgs e)
         {
-            Frame.Navigate(typeof(SettingsStatsPage));
+            Frame.Navigate(typeof(SettingsNetworkPage));
         }
 
-        private async void Proxy_Click(object sender, RoutedEventArgs e)
+        private void Proxy_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new ProxyView();
-            dialog.Server = SettingsHelper.ProxyServer;
-            dialog.Port = SettingsHelper.ProxyPort.ToString();
-            dialog.Username = SettingsHelper.ProxyUsername;
-            dialog.Password = SettingsHelper.ProxyPassword;
-            dialog.IsProxyEnabled = SettingsHelper.IsProxyEnabled;
-            dialog.IsCallsProxyEnabled = SettingsHelper.IsCallsProxyEnabled;
+            Frame.Navigate(typeof(SettingsProxiesPage));
+        }
 
-            var enabled = SettingsHelper.IsProxyEnabled == true;
+        #region Binding
 
-            var confirm = await dialog.ShowQueuedAsync();
-            if (confirm == ContentDialogResult.Primary)
+        private string ConvertFilesDirectory(string path)
+        {
+            if (string.IsNullOrEmpty(path))
             {
-                SettingsHelper.ProxyServer = dialog.Server;
-                SettingsHelper.ProxyPort = Extensions.TryParseOrDefault(dialog.Port, 1080);
-                SettingsHelper.ProxyUsername = dialog.Username;
-                SettingsHelper.ProxyPassword = dialog.Password;
-                SettingsHelper.IsProxyEnabled = dialog.IsProxyEnabled;
-                SettingsHelper.IsCallsProxyEnabled = dialog.IsCallsProxyEnabled;
+                return "Default folder";
+            }
 
-                if (SettingsHelper.IsProxyEnabled || SettingsHelper.IsProxyEnabled != enabled)
+            return path;
+        }
+
+        private string ConvertAutoDownload(AutoDownloadType type, AutoDownloadMode mode, int limit)
+        {
+            int count = 0;
+            var builder = new StringBuilder();
+
+            var mask = new int[4]
+            {
+                mode.HasFlag(AutoDownloadMode.WifiContacts) ? 0 : -1,
+                mode.HasFlag(AutoDownloadMode.WifiPrivateChats) ? 1 : -1,
+                mode.HasFlag(AutoDownloadMode.WifiGroups) ? 2 : -1,
+                mode.HasFlag(AutoDownloadMode.WifiChannels) ? 3 : -1
+            };
+
+            for (int a = 0; a < mask.Length; a++)
+            {
+                if (mask[a] != -1)
                 {
-                    UnigramContainer.Current.ResolveType<ITransportService>().Close();
-                    UnigramContainer.Current.ResolveType<IMTProtoService>().PingAsync(TLLong.Random(), null);
+                    if (builder.Length != 0)
+                    {
+                        builder.Append(", ");
+                    }
+                    switch (a)
+                    {
+                        case 0:
+                            builder.Append(Strings.Resources.AutoDownloadContacts);
+                            break;
+                        case 1:
+                            builder.Append(Strings.Resources.AutoDownloadPm);
+                            break;
+                        case 2:
+                            builder.Append(Strings.Resources.AutoDownloadGroups);
+                            break;
+                        case 3:
+                            builder.Append(Strings.Resources.AutoDownloadChannels);
+                            break;
+                    }
+                    count++;
                 }
             }
+
+            if (count == 4)
+            {
+                builder.Length = 0;
+
+                if (type == AutoDownloadType.Photos)
+                {
+                    builder.Append(Strings.Resources.AutoDownloadOnAllChats);
+                }
+                else
+                {
+                    builder.AppendFormat(Strings.Resources.AutoDownloadUpToOnAllChats, FileSizeConverter.Convert(limit, true));
+                }
+            }
+            else if (count == 0)
+            {
+                builder.Append(Strings.Resources.AutoDownloadOff);
+            }
+            else
+            {
+                if (type == AutoDownloadType.Photos)
+                {
+                    builder = new StringBuilder(string.Format(Strings.Resources.AutoDownloadOnFor, builder.ToString()));
+                }
+                else
+                {
+                    builder = new StringBuilder(string.Format(Strings.Resources.AutoDownloadOnUpToFor, FileSizeConverter.Convert(limit, true), builder.ToString()));
+                }
+            }
+
+            return builder.ToString();
         }
+
+        private string ConvertUseLessData(DataSavingMode value)
+        {
+            switch (value)
+            {
+                default:
+                case DataSavingMode.Never:
+                    return Strings.Resources.UseLessDataNever;
+                case DataSavingMode.MobileOnly:
+                    return Strings.Resources.UseLessDataOnMobile;
+                case DataSavingMode.Always:
+                    return Strings.Resources.UseLessDataAlways;
+            }
+        }
+
+        #endregion
     }
 }

@@ -27,7 +27,7 @@ namespace Unigram.Views.Settings
         public SettingsUsernamePage()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<SettingsUsernameViewModel>();
+            DataContext = TLContainer.Current.Resolve<SettingsUsernameViewModel>();
 
             var observable = Observable.FromEventPattern<TextChangedEventArgs>(Username, "TextChanged");
             var throttled = observable.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(x =>
@@ -39,9 +39,26 @@ namespace Unigram.Views.Settings
             });
         }
 
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            Username.Focus(FocusState.Keyboard);
+        }
+
         private void Copy_Click(Windows.UI.Xaml.Documents.Hyperlink sender, Windows.UI.Xaml.Documents.HyperlinkClickEventArgs args)
         {
             ViewModel.CopyCommand.Execute();
         }
+
+        #region Binding
+
+        public string UsernameHelpLink
+        {
+            get
+            {
+                return string.Format(Strings.Resources.UsernameHelpLink, string.Empty).TrimEnd();
+            }
+        }
+
+        #endregion
     }
 }

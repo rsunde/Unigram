@@ -13,15 +13,20 @@ using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 
-// The Content Dialog item template is documented at https://go.microsoft.com/fwlink/?LinkId=234238
-
 namespace Unigram.Controls.Views
 {
-    public sealed partial class SelectLivePeriodView : ContentDialog
+    public sealed partial class SelectLivePeriodView : TLContentDialog
     {
-        public SelectLivePeriodView()
+        public SelectLivePeriodView(bool single, string name)
         {
             this.InitializeComponent();
+
+            Title = Strings.Resources.SendLiveLocation;
+            PrimaryButtonText = Strings.Resources.ShareFile;
+            SecondaryButtonText = Strings.Resources.Cancel;
+            Footer.Text = single
+                ? string.Format(Strings.Resources.LiveLocationAlertPrivate, name)
+                : Strings.Resources.LiveLocationAlertGroup;
 
             FieldSeconds.ItemsSource = new int[] { 15 * 60, 1 * 60 * 60, 8 * 60 * 60 };
         }

@@ -1,16 +1,20 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Channels;
+using Telegram.Td.Api;
+using Template10.Common;
 using Unigram.Common;
+using Unigram.Controls.Chats;
 using Unigram.Controls.Views;
 using Unigram.Native;
 using Unigram.ViewModels;
 using Windows.System;
 using Windows.UI.Core;
+using Windows.UI.Text;
+using Windows.UI.Text.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Automation.Peers;
 using Windows.UI.Xaml.Automation.Provider;
@@ -19,15 +23,14 @@ using Windows.UI.Xaml.Input;
 
 namespace Unigram.Controls
 {
-    public class CaptionTextBox : TextBox
+    public class CaptionTextBox : FormattedTextBox
     {
         public DialogViewModel ViewModel => DataContext as DialogViewModel;
 
-        public SendMediaView View { get; set; }
+        public IViewWithAutocomplete View { get; set; }
 
         public CaptionTextBox()
         {
-            TextChanged += OnTextChanged;
             SelectionChanged += OnSelectionChanged;
 
             Loaded += OnLoaded;
@@ -36,12 +39,12 @@ namespace Unigram.Controls
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            App.AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
+            WindowContext.GetForCurrentView().AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            App.AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
+            WindowContext.GetForCurrentView().AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
         }
 
         private void Dispatcher_AcceleratorKeyActivated(CoreDispatcher sender, AcceleratorKeyEventArgs args)
@@ -76,13 +79,13 @@ namespace Unigram.Controls
                 }
 
                 // If there is text and CTRL/Shift is not pressed, send message. Else allow new row.
-                if (ApplicationSettings.Current.IsSendByEnterEnabled)
+                if (ViewModel.Settings.IsSendByEnterEnabled)
                 {
                     var send = key.HasFlag(CoreVirtualKeyStates.Down) && !ctrl.HasFlag(CoreVirtualKeyStates.Down) && !shift.HasFlag(CoreVirtualKeyStates.Down);
                     if (send)
                     {
-                        AcceptsReturn = false;
                         View?.Accept();
+                        AcceptsReturn = false;
                     }
                     else
                     {
@@ -94,8 +97,8 @@ namespace Unigram.Controls
                     var send = key.HasFlag(CoreVirtualKeyStates.Down) && ctrl.HasFlag(CoreVirtualKeyStates.Down) && !shift.HasFlag(CoreVirtualKeyStates.Down);
                     if (send)
                     {
-                        AcceptsReturn = false;
                         View?.Accept();
+                        AcceptsReturn = false;
                     }
                     else
                     {
@@ -133,75 +136,41 @@ namespace Unigram.Controls
             }
         }
 
-        private void OnTextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (View?.SelectedItem != null)
-            {
-                View.SelectedItem.Caption = Text.ToString();
-            }
-        }
-
         private void OnSelectionChanged(object sender, RoutedEventArgs e)
         {
-            var text = Text.ToString();
+            Document.GetText(TextGetOptions.NoHidden, out string text);
 
-            if (BubbleTextBox.SearchByUsername(text.Substring(0, Math.Min(SelectionStart, text.Length)), out string username))
+            if (ChatTextBox.SearchByUsername(text.Substring(0, Math.Min(Document.Selection.EndPosition, text.Length)), out string username, out int index))
             {
-                View.Autocomplete = GetUsernames(username);
+                var chat = ViewModel.Chat;
+                if (chat == null)
+                {
+                    return;
+                }
+
+                if (chat.Type is ChatTypeBasicGroup || chat.Type is ChatTypeSupergroup supergroup && !supergroup.IsChannel)
+                {
+                    View.Autocomplete = new ChatTextBox.UsernameCollection(ViewModel.ProtoService, ViewModel.Chat.Id, username, false, true);
+                }
+                else
+                {
+                    View.Autocomplete = null;
+                }
             }
-            else if (BubbleTextBox.SearchByEmoji(text.Substring(0, Math.Min(SelectionStart, text.Length)), out string replacement) && replacement.Length > 0)
+            else if (ChatTextBox.SearchByEmoji(text.Substring(0, Math.Min(Document.Selection.EndPosition, text.Length)), out string replacement) && replacement.Length > 0)
             {
-                View.Autocomplete = EmojiSuggestion.GetSuggestions(replacement);
+                View.Autocomplete = new ChatTextBox.EmojiCollection(ViewModel.ProtoService, replacement.Length < 2 ? replacement : replacement.ToLower(), CoreTextServicesManager.GetForCurrentView().InputLanguage.LanguageTag);
             }
             else
             {
                 View.Autocomplete = null;
             }
         }
+    }
 
-        private List<TLUser> GetUsernames(string username)
-        {
-            bool IsMatch(TLUser user)
-            {
-                if (user.Username == null)
-                {
-                    return false;
-                }
-
-                return (user.FullName.IsLike(username, StringComparison.OrdinalIgnoreCase)) ||
-                       (user.HasUsername && user.Username.StartsWith(username, StringComparison.OrdinalIgnoreCase));
-            }
-
-
-            var results = new List<TLUser>();
-
-            if (ViewModel.Full is TLChatFull chatFull && chatFull.Participants is TLChatParticipants chatParticipants)
-            {
-                foreach (var participant in chatParticipants.Participants)
-                {
-                    if (participant.User != null && IsMatch(participant.User))
-                    {
-                        results.Add(participant.User);
-                    }
-                }
-            }
-            else if (ViewModel.Full is TLChannelFull channelFull && channelFull.Participants is TLChannelsChannelParticipants channelParticipants)
-            {
-                foreach (var participant in channelParticipants.Participants)
-                {
-                    if (participant.User != null && IsMatch(participant.User))
-                    {
-                        results.Add(participant.User);
-                    }
-                }
-            }
-
-            if (results.Count > 0)
-            {
-                return results;
-            }
-
-            return null;
-        }
+    public interface IViewWithAutocomplete
+    {
+        ICollection Autocomplete { get; set; }
+        void Accept();
     }
 }

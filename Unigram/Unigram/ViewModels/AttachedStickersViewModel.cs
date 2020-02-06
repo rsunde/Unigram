@@ -4,50 +4,31 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Template10.Utils;
 using Unigram.Services;
 using Windows.UI.Xaml.Navigation;
+using Telegram.Td.Api;
+using Unigram.Collections;
 
 namespace Unigram.ViewModels
 {
-    public class AttachedStickersViewModel : UnigramViewModelBase
+    public class AttachedStickersViewModel : TLViewModelBase
     {
-        private readonly IStickersService _stickersService;
-        private readonly DialogStickersViewModel _stickers;
-
-        public AttachedStickersViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator, IStickersService stickersService, DialogStickersViewModel stickers)
-            : base(protoService, cacheService, aggregator)
+        public AttachedStickersViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
-            _stickersService = stickersService;
-            _stickers = stickers;
-
-            Items = new ObservableCollection<TLStickerSetMultiCovered>();
+            Items = new MvxObservableCollection<StickerSetInfo>();
         }
 
         public override async Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            if (parameter is TLInputStickeredMediaBase stickeredMedia)
+            if (parameter is int fileId)
             {
                 IsLoading = true;
 
-                var response = await ProtoService.GetAttachedStickersAsync(stickeredMedia);
-                if (response.IsSucceeded)
+                var response = await ProtoService.SendAsync(new GetAttachedStickerSets(fileId));
+                if (response is StickerSets sets)
                 {
-                    Items.Clear();
-                    Items.AddRange(response.Result.Select(
-                        set => 
-                        {
-                            if (set is TLStickerSetCovered covered)
-                            {
-                                return new TLStickerSetMultiCovered { Set = covered.Set, Covers = new TLVector<TLDocumentBase> { covered.Cover } };
-                            }
-
-                            return set as TLStickerSetMultiCovered;
-                        }));
+                    Items.ReplaceWith(sets.Sets);
 
                     IsLoading = false;
                 }
@@ -62,6 +43,6 @@ namespace Unigram.ViewModels
             }
         }
 
-        public ObservableCollection<TLStickerSetMultiCovered> Items { get; private set; }
+        public MvxObservableCollection<StickerSetInfo> Items { get; private set; }
     }
 }

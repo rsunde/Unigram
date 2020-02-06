@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Services;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Messages;
+using Telegram.Td.Api;
+using Unigram.Collections;
 using Unigram.Common;
 using Unigram.Controls;
-using Unigram.Core.Common;
+using Unigram.Services;
+using Unigram.ViewModels.Gallery;
 using Unigram.ViewModels.Users;
 using Windows.UI.Xaml.Controls;
 
@@ -17,103 +17,161 @@ namespace Unigram.ViewModels.Chats
     public class ChatPhotosViewModel : GalleryViewModelBase
     {
         private readonly DisposableMutex _loadMoreLock = new DisposableMutex();
-        private readonly TLInputPeerBase _peer;
+        //private readonly TLInputPeerBase _peer;
 
         private int _lastMaxId;
+        private readonly long _chatId;
 
-        public ChatPhotosViewModel(IMTProtoService protoService, TLChatFullBase chatFull, TLChatBase chat)
-            : base(protoService, null, null)
+        public ChatPhotosViewModel(IProtoService protoService, IEventAggregator aggregator, Chat chat)
+            : base(protoService, aggregator)
         {
-            _peer = chat.ToInputPeer();
-            _lastMaxId = int.MaxValue;
+            _chatId = chat.Id;
 
-            Items = new MvxObservableCollection<GalleryItem> { new GalleryPhotoItem(chatFull.ChatPhoto as TLPhoto, chat) };
+            //_peer = chat.ToInputPeer();
+            //_lastMaxId = int.MaxValue;
+
+            Items = new MvxObservableCollection<GalleryContent> { new GalleryChatPhoto(protoService, chat.Photo) };
             SelectedItem = Items[0];
             FirstItem = Items[0];
 
-            Initialize();
+            Initialize(chat.Photo.Big.Id, chat.Photo.Small.Id);
         }
 
-        private async void Initialize()
+        //public ChatPhotosViewModel(IProtoService protoService, IEventAggregator aggregator, TLChatFullBase chatFull, TLChatBase chat, TLMessageService serviceMessage)
+        //    : base(protoService, aggregator)
+        //{
+        //    _peer = chat.ToInputPeer();
+        //    _lastMaxId = serviceMessage.Id;
+
+        //    if (serviceMessage.Action is TLMessageActionChatEditPhoto editPhotoAction)
+        //    {
+        //        Items = new MvxObservableCollection<GalleryItem> { new GalleryPhotoItem(editPhotoAction.Photo as TLPhoto, chat) };
+        //        SelectedItem = Items[0];
+        //        FirstItem = Items[0];
+        //    }
+
+        //    Initialize(serviceMessage.Id);
+        //}
+
+        private async void Initialize(long bigId, long smallId)
         {
             using (await _loadMoreLock.WaitAsync())
             {
-                var response = await ProtoService.SearchAsync(_peer, string.Empty, null, new TLInputMessagesFilterChatPhotos(), 0, 0, 0, _lastMaxId, 15);
-                if (response.IsSucceeded)
+                var limit = 20;
+                var offset = -limit / 2;
+
+                var response = await ProtoService.SendAsync(new SearchChatMessages(_chatId, string.Empty, 0, 0, offset, limit, new SearchMessagesFilterChatPhoto()));
+                if (response is Telegram.Td.Api.Messages messages)
                 {
-                    if (response.Result.Messages.Count > 0)
+                    TotalItems = messages.TotalCount;
+
+                    var missing = true;
+
+                    foreach (var message in messages.MessagesValue.OrderByDescending(x => x.Id))
                     {
-                        if (response.Result is TLMessagesMessagesSlice slice)
+                        if (message.Content is MessageChatChangePhoto chatChangePhoto)
                         {
-                            TotalItems = slice.Count;
-                        }
-                        else if (response.Result is TLMessagesChannelMessages channelMessages)
-                        {
-                            TotalItems = channelMessages.Count;
+                            if (chatChangePhoto.Photo.Sizes.Any(x => x.Photo.Id == bigId))
+                            {
+                                missing = false;
+                                continue;
+                            }
+
+                            Items.Add(new GalleryMessage(ProtoService, message));
                         }
                         else
                         {
-                            TotalItems = response.Result.Messages.Count;
+                            TotalItems--;
                         }
-
-                        //Items.Clear();
-
-                        var items = new List<GalleryItem>(response.Result.Messages.Count);
-
-                        foreach (var photo in response.Result.Messages)
-                        {
-                            if (photo is TLMessageService message && message.Action is TLMessageActionChatEditPhoto)
-                            {
-                                items.Insert(0, new GalleryMessageServiceItem(message));
-                                _lastMaxId = message.Id;
-                            }
-                            else
-                            {
-                                TotalItems--;
-                            }
-                        }
-
-                        Items.ReplaceWith(items);
-                        SelectedItem = Items.LastOrDefault();
-                        FirstItem = Items.LastOrDefault();
                     }
-                    else
+
+                    if (missing)
                     {
-                        TotalItems = 1;
+                        TotalItems++;
                     }
+
+                    OnSelectedItemChanged(_selectedItem);
                 }
             }
+        }
+
+        protected override async void LoadPrevious()
+        {
+            //using (await _loadMoreLock.WaitAsync())
+            //{
+            //    var item = Items.FirstOrDefault() as GalleryMessageItem;
+            //    if (item == null)
+            //    {
+            //        return;
+            //    }
+
+            //    var fromMessageId = item.Id;
+
+            //    var limit = 20;
+            //    var offset = -limit / 2;
+
+            //    var response = await ProtoService.SendAsync(new SearchChatMessages(_chatId, string.Empty, 0, fromMessageId, offset, limit, new SearchMessagesFilterChatPhoto()));
+            //    if (response is Telegram.Td.Api.Messages messages)
+            //    {
+            //        TotalItems = messages.TotalCount;
+
+            //        foreach (var message in messages.MessagesValue.Where(x => x.Id < fromMessageId))
+            //        {
+            //            if (message.Content is MessageChatChangePhoto)
+            //            {
+            //                Items.Insert(0, new GalleryMessageItem(ProtoService, message));
+            //            }
+            //            else
+            //            {
+            //                TotalItems--;
+            //            }
+            //        }
+
+            //        OnSelectedItemChanged(_selectedItem);
+            //    }
+            //}
         }
 
         protected override async void LoadNext()
         {
-            if (TotalItems > Items.Count)
-            {
-                using (await _loadMoreLock.WaitAsync())
-                {
-                    var response = await ProtoService.SearchAsync(_peer, string.Empty, null, new TLInputMessagesFilterChatPhotos(), 0, 0, 0, _lastMaxId, 15);
-                    if (response.IsSucceeded)
-                    {
-                        foreach (var photo in response.Result.Messages)
-                        {
-                            if (photo is TLMessageService message && message.Action is TLMessageActionChatEditPhoto)
-                            {
-                                Items.Insert(0, new GalleryMessageServiceItem(message));
-                            }
-                            else
-                            {
-                                TotalItems--;
-                            }
-                        }
+            //using (await _loadMoreLock.WaitAsync())
+            //{
+            //    var item = Items.LastOrDefault() as GalleryMessageItem;
+            //    if (item == null)
+            //    {
+            //        return;
+            //    }
 
-                        //SelectedItem = Items.LastOrDefault();
-                        //FirstItem = Items.LastOrDefault();
-                    }
-                }
-            }
+            //    var fromMessageId = item.Id;
+
+            //    var limit = 20;
+            //    var offset = -limit / 2;
+
+            //    var response = await ProtoService.SendAsync(new SearchChatMessages(_chatId, string.Empty, 0, fromMessageId, offset, limit, new SearchMessagesFilterChatPhoto()));
+            //    if (response is Telegram.Td.Api.Messages messages)
+            //    {
+            //        TotalItems = messages.TotalCount;
+
+            //        foreach (var message in messages.MessagesValue.Where(x => x.Id > fromMessageId).OrderBy(x => x.Id))
+            //        {
+            //            if (message.Content is MessageChatChangePhoto)
+            //            {
+            //                Items.Add(new GalleryMessageItem(ProtoService, message));
+            //            }
+            //            else
+            //            {
+            //                TotalItems--;
+            //            }
+            //        }
+
+            //        OnSelectedItemChanged(_selectedItem);
+            //    }
+            //}
         }
 
-        public override bool CanView => true;
+        public override int Position => TotalItems - (Items.Count - base.Position);
+
+        public override MvxObservableCollection<GalleryContent> Group => this.Items;
     }
 
     //public class GalleryChatPhotoItem : GalleryItem
@@ -143,4 +201,5 @@ namespace Unigram.ViewModels.Chats
     //        return new TLInputStickeredMediaPhoto { Id = _photo.ToInputPhoto() };
     //    }
     //}
+
 }

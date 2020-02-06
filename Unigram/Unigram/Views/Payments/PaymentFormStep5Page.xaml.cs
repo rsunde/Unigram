@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
+using Unigram.Common;
 using Unigram.Converters;
 using Unigram.ViewModels.Payments;
 using Windows.Foundation;
@@ -27,15 +28,17 @@ namespace Unigram.Views.Payments
         public PaymentFormStep5Page()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<PaymentFormStep5ViewModel>();
+            DataContext = TLContainer.Current.Resolve<PaymentFormStep5ViewModel>();
+
+            Transitions = ApiInfo.CreateSlideTransition();
         }
 
         private string ConvertTitle(bool test)
         {
-            return test ? "Test checkout" : "Checkout";
+            return (test ? "Test " : string.Empty) +  Strings.Resources.PaymentCheckout;
         }
 
-        private string ConvertAddress(TLPostAddress address)
+        private string ConvertAddress(Address address)
         {
             if (address == null)
             {
@@ -59,17 +62,21 @@ namespace Unigram.Views.Payments
             {
                 result += address.State + ", ";
             }
-            if (!string.IsNullOrEmpty(address.CountryIso2))
+            if (!string.IsNullOrEmpty(address.CountryCode))
             {
-                result += address.CountryIso2 + ", ";
+                result += address.CountryCode + ", ";
             }
-            if (!string.IsNullOrEmpty(address.PostCode))
+            if (!string.IsNullOrEmpty(address.PostalCode))
             {
-                result += address.PostCode + ", ";
+                result += address.PostalCode + ", ";
             }
 
             return result.Trim(',', ' ');
         }
 
+        private string ConvertPay(long amount, string currency)
+        {
+            return string.Format(Strings.Resources.PaymentCheckoutPay, Locale.FormatCurrency(amount, currency));
+        }
     }
 }

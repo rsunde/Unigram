@@ -2,6 +2,7 @@
 <StoreAssociation xmlns="http://schemas.microsoft.com/appx/2010/storeassociation">
   <Publisher>CN=D89C87B4-2758-402A-8F40-3571D00882AB</Publisher>
   <PublisherDisplayName>Unigram, Inc.</PublisherDisplayName>
+  <DeveloperAccountType>MSA</DeveloperAccountType>
   <GeneratePackageHash>http://www.w3.org/2001/04/xmlenc#sha256</GeneratePackageHash>
   <SupportedLocales>
     <Language Code="af" InMinimumRequirementSet="true" />
@@ -358,13 +359,24 @@
     <Language Code="zu-za" InMinimumRequirementSet="true" />
   </SupportedLocales>
   <ProductReservedInfo>
-    <MainPackageIdentityName>38833FF26BA1D.Unigram</MainPackageIdentityName>
+    <MainPackageIdentityName>38833FF26BA1D.UnigramPreview</MainPackageIdentityName>
     <ReservedNames>
+      <ReservedName>Unigram Preview</ReservedName>
+      <ReservedName>Unigram (Alpha)</ReservedName>
+      <ReservedName>Unigram (Beta)</ReservedName>
+      <ReservedName>Unigram Alpha</ReservedName>
+      <ReservedName>Unigram Beta</ReservedName>
       <ReservedName>Unigram</ReservedName>
+      <ReservedName>Unigram for Telegram</ReservedName>
+      <ReservedName>Unigram - Telegram, universal</ReservedName>
+      <ReservedName>Unigram - A Telegram immersive experience</ReservedName>
+      <ReservedName>Unigram - A Telegram universal experience</ReservedName>
+      <ReservedName>Unigram X</ReservedName>
     </ReservedNames>
   </ProductReservedInfo>
   <AccountPackageIdentityNames>
-    <MainPackageIdentityName>38833FF26BA1D.UnigramPreview</MainPackageIdentityName>
+    <MainPackageIdentityName>38833FF26BA1D.TelegramX</MainPackageIdentityName>
+    <MainPackageIdentityName>38833FF26BA1D.UnigramExperimental</MainPackageIdentityName>
   </AccountPackageIdentityNames>
-  <PackageInfoList LandingUrl="https://developer.microsoft.com/dashboard/Application?appId=9NBLGGH4S3N3" />
+  <PackageInfoList LandingUrl="https://developer.microsoft.com/dashboard/Application?appId=9N97ZCKPD60Q" />
 </StoreAssociation>

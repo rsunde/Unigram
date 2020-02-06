@@ -1,15 +1,257 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Telegram.Td.Api;
+using Unigram.Native;
+using Unigram.Services;
+using Unigram.Services.Settings;
 
 namespace Unigram.Common
 {
-    public static class Emoji
+    public class EmojiSet
     {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public int Version { get; set; }
+
+        public File Thumbnail { get; set; }
+        public File Document { get; set; }
+
+        public bool IsDefault { get; set; }
+        public bool IsOfficial { get; set; }
+
+        public bool UpdateFile(File file)
+        {
+            if (Thumbnail.Id == file.Id)
+            {
+                Thumbnail = file;
+                return true;
+            }
+            else if (Document.Id == file.Id)
+            {
+                Document = file;
+                return true;
+            }
+
+            return false;
+        }
+
+        public InstalledEmojiSet ToInstalled()
+        {
+            return new InstalledEmojiSet
+            {
+                Id = Id,
+                Title = Title,
+                Version = Version
+            };
+        }
+    }
+
+    public enum EmojiSkinTone
+    {
+        Default,
+        Fitz12,
+        Fitz3,
+        Fitz4,
+        Fitz5,
+        Fitz6
+    }
+
+    public class EmojiData
+    {
+        protected EmojiData()
+        {
+
+        }
+
+        public EmojiData(string value)
+        {
+            Value = value;
+        }
+
+        public string Value { get; protected set; }
+    }
+
+    public class EmojiSkinData : EmojiData, INotifyPropertyChanged
+    {
+        private string _value;
+
+        public EmojiSkinData(string value, EmojiSkinTone tone)
+        {
+            _value = value;
+            SetValue(tone);
+        }
+
+        public void SetValue(EmojiSkinTone tone)
+        {
+            if (tone == EmojiSkinTone.Default)
+            {
+                Value = _value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Value"));
+
+                return;
+            }
+
+            var emoji = _value;
+            var result = string.Empty;
+
+            if (char.IsSurrogatePair(emoji, 0))
+            {
+                result = emoji.Substring(0, 2);
+                emoji = emoji.Substring(2);
+            }
+            else if (emoji.Length <= 2)
+            {
+                result = emoji;
+                emoji = string.Empty;
+            }
+            else if (emoji.Length == 5 && (emoji[3] == '\u2642' || emoji[3] == '\u2640'))
+            {
+                result = emoji.Substring(0, 1);
+                emoji = emoji.Substring(1);
+            }
+
+            switch (tone)
+            {
+                case EmojiSkinTone.Fitz12:
+                    result += "\uD83C\uDFFB";
+                    break;
+                case EmojiSkinTone.Fitz3:
+                    result += "\uD83C\uDFFC";
+                    break;
+                case EmojiSkinTone.Fitz4:
+                    result += "\uD83C\uDFFD";
+                    break;
+                case EmojiSkinTone.Fitz5:
+                    result += "\uD83C\uDFFE";
+                    break;
+                case EmojiSkinTone.Fitz6:
+                    result += "\uD83C\uDFFF";
+                    break;
+            }
+
+            Value = result + emoji;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Value"));
+        }
+
+
+
+        #region INotifyPropertyChanged
+
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        #endregion
+    }
+
+    public class EmojiGroup
+    {
+        public string Title { get; set; }
+        public string Glyph { get; set; }
+
+        public EmojiData[] Items { get; set; }
+    }
+
+    public static partial class Emoji
+    {
+        partial class EmojiGroupInternal
+        {
+            public string Title { get; set; }
+            public string Glyph { get; set; }
+
+            public string[] Items { get; set; }
+
+            public EmojiGroup ToGroup(EmojiSkinTone tone)
+            {
+                return new EmojiGroup
+                {
+                    Title = Title,
+                    Glyph = Glyph,
+                    Items = Items.Select(x =>
+                    {
+                        if (_skinEmojis.Contains(x))
+                        {
+                            return new EmojiSkinData(x, tone);
+                        }
+
+                        return new EmojiData(x);
+
+                    }).ToArray()
+                };
+            }
+        }
+
+        public static List<EmojiGroup> Get(EmojiSkinTone skin, bool flags)
+        {
+            var results = new List<EmojiGroup>();
+            var recent = new EmojiGroup
+            {
+                Title = Strings.Resources.RecentStickers,
+                Glyph = "🕒",
+                Items = SettingsService.Current.Emoji.GetRecentEmoji()
+            };
+
+            results.Add(recent);
+
+            if (flags)
+            {
+                results.AddRange(Items.Select(x => x.ToGroup(skin)));
+            }
+            else
+            {
+                results.AddRange(Items.Take(Items.Count - 1).Select(x => x.ToGroup(skin)));
+            }
+
+            return results;
+        }
+
+        public static async Task<List<EmojiGroup>> SearchAsync(IProtoService protoService, string query, EmojiSkinTone skin, string inputLanguage)
+        {
+            var result = new List<EmojiData>();
+
+            var response = await protoService.SendAsync(new SearchEmojis(query, false, inputLanguage));
+            if (response is Emojis suggestions)
+            {
+                foreach (var item in suggestions.EmojisValue)
+                {
+                    var emoji = item;
+                    if (EmojiGroupInternal._skinEmojis.Contains(emoji) || EmojiGroupInternal._skinEmojis.Contains(emoji.TrimEnd('\uFE0F')))
+                    {
+                        result.Add(new EmojiSkinData(emoji, skin));
+                    }
+                    else
+                    {
+                        result.Add(new EmojiData(item));
+                    }
+                }
+            }
+
+            return new List<EmojiGroup>
+            {
+                new EmojiGroup
+                {
+                    Title = result.Count > 0 ? Strings.Resources.SearchEmojiHint : Strings.Resources.NoEmojiFound,
+                    Items = result.ToArray()
+                }
+            };
+        }
+
         public static bool ContainsSingleEmoji(string text)
         {
+            text = text.Trim();
+
+            if (text.Length < 1 || text.Contains(" "))
+            {
+                return false;
+            }
+
+            return _rawEmojis.Contains(text);
+
+
+
             var result = false;
             var processed = false;
 
@@ -33,6 +275,50 @@ namespace Unigram.Common
             }
 
             return result;
+        }
+
+        public static bool TryCountEmojis(string text, out int count, int max = int.MaxValue)
+        {
+            count = 0;
+            text = text.Trim();
+
+            if (text.Contains(" "))
+            {
+                return false;
+            }
+
+            var result = false;
+
+            foreach (var last in EnumerateByComposedCharacterSequence(text))
+            {
+                if (_rawEmojis.Contains(last))
+                {
+                    count++;
+                    result = count <= max;
+
+                    if (count > max)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    count = 0;
+                    result = false;
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        public static void Assert()
+        {
+            var stringify = String.Join(string.Empty, _rawEmojis);
+            var success = TryCountEmojis(stringify, out int count);
+
+            Debug.Assert(success);
+            Debug.Assert(count == _rawEmojis.Length);
         }
 
         public static bool IsEmoji(string text)
@@ -65,23 +351,40 @@ namespace Unigram.Common
                 if (char.IsSurrogatePair(text, i) || IsKeyCapCharacter(text, i) || IsModifierCharacter(text, i))
                 {
                     // skin modifier for emoji diversity acts as a joiner
-                    if (!joiner && !IsSkinModifierCharacter(text, i))
+                    var skin = IsSkinModifierCharacter(text, i);
+                    if (!joiner && !skin)
                     {
                         yield return last;
                         last = string.Empty;
                         joiner = true;
                     }
 
-                    last += text[i + 0];
-                    last += text[i + 1];
+                    if (!skin)
+                    {
+                        last += text[i + 0];
+                        last += text[i + 1];
+                    }
+
                     joiner = IsRegionalIndicator(text, i);
                     i++;
                 }
                 else if (text[i] == 0x200D) // zero width joiner
-                //else if (char.IsControl(text, i))
                 {
                     last += text[i];
                     joiner = true;
+                }
+                else if (text[i] == 0xFE0F) // variation selector
+                {
+                    last += text[i];
+
+                    if (i + 1 < text.Length && text[i + 1] == 0x200D)
+                    {
+                        joiner = true;
+                    }
+                }
+                else if (text[i] == 0x20E3)
+                {
+                    last += text[i];
                 }
                 else
                 {

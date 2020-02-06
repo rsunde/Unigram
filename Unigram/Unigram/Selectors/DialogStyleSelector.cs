@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
+using Unigram.Services;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 
@@ -15,12 +16,14 @@ namespace Unigram.Selectors
 
         public Style PinnedStyle { get; set; }
 
+        public ICacheService CacheService { get; set; }
+
         protected override Style SelectStyleCore(object item, DependencyObject container)
         {
-            var dialog = item as TLDialog;
-            if (dialog != null)
+            var chat = item as Chat;
+            if (chat != null)
             {
-                return dialog.IsPinned ? PinnedStyle : DialogStyle;
+                return chat.IsPinned || (CacheService != null && CacheService.IsChatSponsored(chat)) ? PinnedStyle : DialogStyle;
             }
 
             return base.SelectStyleCore(item, container);

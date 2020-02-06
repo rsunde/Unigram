@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.TL;
 using Unigram.Views;
 using Unigram.ViewModels;
 using Windows.Foundation;
@@ -27,380 +26,625 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Streams;
 using Unigram.Common;
 using Unigram.Converters;
+using Windows.UI.Core;
+using Telegram.Td.Api;
+using Windows.UI.Xaml.Documents;
+using Unigram.Collections;
+using Windows.UI.Xaml.Automation.Peers;
+using Windows.UI.Xaml.Automation.Provider;
+using Unigram.Controls.Cells;
+using System.Reactive.Linq;
+using System.Threading.Tasks;
 
 namespace Unigram.Controls.Views
 {
-    public sealed partial class ShareView : ContentDialogBase
+    public sealed partial class ShareView : TLContentDialog
     {
         public ShareViewModel ViewModel => DataContext as ShareViewModel;
 
         private ShareView()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<ShareViewModel>();
+            DataContext = TLContainer.Current.Resolve<ShareViewModel>();
 
-            Loaded += OnLoaded;
-            Unloaded += OnUnloaded;
-        }
+            //Title = Strings.Resources.ShareSendTo;
+            PrimaryButtonText = Strings.Resources.Send;
+            SecondaryButtonText = Strings.Resources.Close;
 
-        private void OnLoaded(object sender, RoutedEventArgs e)
-        {
-            Bindings.Update();
-
-            if (ApiInformation.IsEventPresent("Windows.ApplicationModel.DataTransfer.DataTransferManager", "ShareProvidersRequested") && !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 5))
+            var observable = Observable.FromEventPattern<TextChangedEventArgs>(SearchField, "TextChanged");
+            var throttled = observable.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(async x =>
             {
-                DataTransferManager.GetForCurrentView().ShareProvidersRequested -= OnShareProvidersRequested;
-                DataTransferManager.GetForCurrentView().ShareProvidersRequested += OnShareProvidersRequested;
-            }
-
-            DataTransferManager.GetForCurrentView().DataRequested -= OnDataRequested;
-            DataTransferManager.GetForCurrentView().DataRequested += OnDataRequested;
-        }
-
-        private void OnUnloaded(object sender, RoutedEventArgs e)
-        {
-            if (ApiInformation.IsEventPresent("Windows.ApplicationModel.DataTransfer.DataTransferManager", "ShareProvidersRequested") && !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 5))
-            {
-                DataTransferManager.GetForCurrentView().ShareProvidersRequested -= OnShareProvidersRequested;
-            }
-
-            DataTransferManager.GetForCurrentView().DataRequested -= OnDataRequested;
-
-            List.SelectedItems.Clear();
-        }
-
-        private void OnShareProvidersRequested(DataTransferManager sender, ShareProvidersRequestedEventArgs args)
-        {
-            if (args.Data.Contains(StandardDataFormats.WebLink))
-            {
-                var icon = RandomAccessStreamReference.CreateFromUri(new Uri(@"ms-appx:///Assets/Images/ShareProvider_CopyLink24x24.png"));
-                var provider = new ShareProvider("Copy link", icon, (Color)App.Current.Resources["SystemAccentColor"], OnShareToClipboard);
-                args.Providers.Add(provider);
-            }
-
-            Hide();
-        }
-
-        private async void OnShareToClipboard(ShareProviderOperation operation)
-        {
-            var webLink = await operation.Data.GetWebLinkAsync();
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(webLink.ToString());
-
-            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-            {
-                ClipboardEx.TrySetContent(dataPackage);
-                operation.ReportCompleted();
+                var items = ViewModel.Search;
+                if (items != null && string.Equals(SearchField.Text, items.Query))
+                {
+                    await items.LoadMoreItemsAsync(2);
+                    await items.LoadMoreItemsAsync(3);
+                }
             });
-        }
 
-        private void OnDataRequested(DataTransferManager sender, DataRequestedEventArgs args)
-        {
-            var package = args.Request.Data;
-            package.Properties.Title = ViewModel.ShareTitle;
-            package.SetText(ViewModel.ShareLink.ToString());
-            package.SetWebLink(ViewModel.ShareLink);
-        }
-
-        private static ShareView _current;
-        public static ShareView Current
-        {
-            get
+            if (ApiInformation.IsEnumNamedValuePresent("Windows.UI.Xaml.Controls.Primitives.FlyoutPlacementMode", "BottomEdgeAlignedRight"))
             {
-                if (_current == null)
-                    _current = new ShareView();
-
-                return _current;
+                MenuFlyout.Placement = FlyoutPlacementMode.BottomEdgeAlignedRight;
             }
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLMessage message, bool withMyScore = false)
+        #region Show
+
+        private static Dictionary<int, WeakReference<ShareView>> _windowContext = new Dictionary<int, WeakReference<ShareView>>();
+        public static ShareView GetForCurrentView()
         {
-            ViewModel.ShareLink = null;
-            ViewModel.ShareTitle = null;
+            return new ShareView();
+
+            var id = ApplicationView.GetApplicationViewIdForWindow(Window.Current.CoreWindow);
+            if (_windowContext.TryGetValue(id, out WeakReference<ShareView> reference) && reference.TryGetTarget(out ShareView value))
+            {
+                return value;
+            }
+
+            var context = new ShareView();
+            _windowContext[id] = new WeakReference<ShareView>(context);
+
+            return context;
+        }
+
+        public Task<ContentDialogResult> ShowAsync(DataPackageView package)
+        {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Single;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = false;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
+            ViewModel.Package = package;
+
+            return ShowAsync();
+        }
+
+        public Task<ContentDialogResult> ShowAsync(InlineKeyboardButtonTypeSwitchInline switchInline, User bot)
+        {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Single;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = false;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
+            ViewModel.SwitchInline = switchInline;
+            ViewModel.SwitchInlineBot = bot;
+
+            return ShowAsync();
+        }
+
+        public Task<ContentDialogResult> ShowAsync(string message, bool hasUrl)
+        {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Single;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = true;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
+            ViewModel.SendMessage = message;
+            ViewModel.SendMessageUrl = hasUrl;
+
+            return ShowAsync();
+        }
+
+        public Task<ContentDialogResult> ShowAsync(Message message, bool withMyScore = false)
+        {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Multiple;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = true;
+            ViewModel.IsSendAsCopyEnabled = true;
+
+            ViewModel.Clear();
             ViewModel.Messages = new[] { message };
-            ViewModel.InputMedia = null;
             ViewModel.IsWithMyScore = withMyScore;
 
-            var channel = message.Parent as TLChannel;
-            if (channel != null && channel.IsBroadcast && channel.HasUsername)
+            var chat = ViewModel.ProtoService.GetChat(message.ChatId);
+            if (chat != null && chat.Type is ChatTypeSupergroup super && super.IsChannel && ViewModel.ProtoService.GetSupergroup(super.SupergroupId) is Supergroup supergroup && supergroup.Username.Length > 0)
             {
-                var link = $"{channel.Username}/{message.Id}";
+                var link = $"{supergroup.Username}/{message.Id}";
 
-                if (message.IsRoundVideo())
+                if (message.Content is MessageVideoNote)
                 {
                     link = $"https://telesco.pe/{link}";
                 }
                 else
                 {
-                    link = UsernameToLinkConverter.Convert(link);
+                    link = MeUrlPrefixConverter.Convert(ViewModel.ProtoService, link);
                 }
 
-                string title = null;
-
-                var media = message.Media as ITLMessageMediaCaption;
-                if (media != null && !string.IsNullOrWhiteSpace(media.Caption))
+                var title = message.Content.GetCaption()?.Text;
+                if (message.Content is MessageText text)
                 {
-                    title = media.Caption;
-                }
-                else if (!string.IsNullOrWhiteSpace(message.Message))
-                {
-                    title = message.Message;
+                    title = text.Text.Text;
                 }
 
                 ViewModel.ShareLink = new Uri(link);
-                ViewModel.ShareTitle = title ?? channel.DisplayName;
+                ViewModel.ShareTitle = title ?? ViewModel.ProtoService.GetTitle(chat);
             }
-            else if (message.Media is TLMessageMediaGame gameMedia)
+            else if (message.Content is MessageGame game)
             {
-                if (message.ViaBot != null && message.ViaBot.Username != null)
+                var viaBot = ViewModel.ProtoService.GetUser(message.ViaBotUserId);
+                if (viaBot != null && viaBot.Username.Length > 0)
                 {
-                    ViewModel.ShareLink = new Uri(UsernameToLinkConverter.Convert($"{message.From.Username}?game={gameMedia.Game.ShortName}"));
-                    ViewModel.ShareTitle = gameMedia.Game.Title;
+                    ViewModel.ShareLink = new Uri(MeUrlPrefixConverter.Convert(ViewModel.ProtoService, $"{viaBot.Username}?game={game.Game.ShortName}"));
+                    ViewModel.ShareTitle = game.Game.Title;
                 }
             }
 
             return ShowAsync();
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(IEnumerable<TLMessage> messages, bool withMyScore = false)
+        public Task<ContentDialogResult> ShowAsync(IList<Message> messages, bool withMyScore = false)
         {
-            ViewModel.ShareLink = null;
-            ViewModel.ShareTitle = null;
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Multiple;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = true;
+            ViewModel.IsSendAsCopyEnabled = true;
+
+            ViewModel.Clear();
             ViewModel.Messages = messages;
-            ViewModel.InputMedia = null;
             ViewModel.IsWithMyScore = withMyScore;
 
             return ShowAsync();
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(Uri link, string title)
+        public Task<ContentDialogResult> ShowAsync(Uri link, string title)
         {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Multiple;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = true;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
             ViewModel.ShareLink = link;
             ViewModel.ShareTitle = title;
-            ViewModel.Messages = null;
-            ViewModel.InputMedia = null;
-            ViewModel.IsWithMyScore = false;
 
             return ShowAsync();
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLInputMediaBase inputMedia)
+        public Task<ContentDialogResult> ShowAsync(InputMessageContent inputMedia)
         {
-            ViewModel.ShareLink = null;
-            ViewModel.ShareTitle = null;
-            ViewModel.Messages = null;
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Multiple;
+            ViewModel.SearchType = SearchChatsType.Post;
+            ViewModel.IsCommentEnabled = true;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
             ViewModel.InputMedia = inputMedia;
-            ViewModel.IsWithMyScore = false;
 
-            if (inputMedia is TLInputMediaGame gameMedia && gameMedia.Id is TLInputGameShortName shortName)
-            {
-                // TODO: maybe?
-            }
-
-            return ShowAsync();
-        }
-
-        private Border LineTop;
-        private Border LineAccent;
-
-        private ScrollViewer _scrollingHost;
-
-        private SpriteVisual _backgroundVisual;
-        private ExpressionAnimation _expression;
-        private ExpressionAnimation _expressionClip;
-
-        private void GridView_Loaded(object sender, RoutedEventArgs e)
-        {
-            var scroll = List.Descendants<ScrollViewer>().FirstOrDefault() as ScrollViewer;
-            if (scroll != null)
-            {
-                _scrollingHost = scroll;
-                _scrollingHost.ChangeView(null, 0, null, true);
-                scroll.ViewChanged += Scroll_ViewChanged;
-                Scroll_ViewChanged(scroll, null);
-
-                var brush = App.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-                var props = ElementCompositionPreview.GetScrollViewerManipulationPropertySet(scroll);
-
-                if (_backgroundVisual == null)
-                {
-                    _backgroundVisual = ElementCompositionPreview.GetElementVisual(BackgroundPanel).Compositor.CreateSpriteVisual();
-                    ElementCompositionPreview.SetElementChildVisual(BackgroundPanel, _backgroundVisual);
-                }
-
-                _backgroundVisual.Brush = _backgroundVisual.Compositor.CreateColorBrush(brush.Color);
-                _backgroundVisual.Size = new System.Numerics.Vector2((float)BackgroundPanel.ActualWidth, (float)BackgroundPanel.ActualHeight);
-                _backgroundVisual.Clip = _backgroundVisual.Compositor.CreateInsetClip();
-
-                _expression = _expression ?? _backgroundVisual.Compositor.CreateExpressionAnimation("Max(Maximum, Scrolling.Translation.Y)");
-                _expression.SetReferenceParameter("Scrolling", props);
-                _expression.SetScalarParameter("Maximum", -(float)BackgroundPanel.Margin.Top + 1);
-                _backgroundVisual.StopAnimation("Offset.Y");
-                _backgroundVisual.StartAnimation("Offset.Y", _expression);
-
-                _expressionClip = _expressionClip ?? _backgroundVisual.Compositor.CreateExpressionAnimation("Min(0, Maximum - Scrolling.Translation.Y)");
-                _expressionClip.SetReferenceParameter("Scrolling", props);
-                _expressionClip.SetScalarParameter("Maximum", -(float)BackgroundPanel.Margin.Top + 1);
-                _backgroundVisual.Clip.StopAnimation("Offset.Y");
-                _backgroundVisual.Clip.StartAnimation("Offset.Y", _expressionClip);
-            }
-
-            var panel = List.ItemsPanelRoot as ItemsWrapGrid;
-            if (panel != null)
-            {
-                panel.SizeChanged += (s, args) =>
-                {
-                    Scroll_ViewChanged(scroll, null);
-                };
-            }
-        }
-
-        private void GroupHeader_Loaded(object sender, RoutedEventArgs e)
-        {
-            var groupHeader = sender as Grid;
-            if (groupHeader != null)
-            {
-                LineTop = groupHeader.FindName("LineTop") as Border;
-                LineAccent = groupHeader.FindName("LineAccent") as Border;
-
-                if (_scrollingHost != null)
-                {
-                    Scroll_ViewChanged(_scrollingHost, null);
-                }
-            }
-        }
-
-        private void Scroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
-        {
-            var scroll = sender as ScrollViewer;
-            var top = 1;
-            var accent = 0;
-            var bottom = 1;
-
-            if (scroll.VerticalOffset <= BackgroundPanel.Margin.Top)
-            {
-                top = 0;
-            }
-            if (scroll.VerticalOffset < BackgroundPanel.Margin.Top)
-            {
-                accent = 1;
-            }
-            if (scroll.VerticalOffset == scroll.ScrollableHeight)
-            {
-                bottom = 0;
-            }
-
-            //if (LineTop.BorderThickness.Bottom != top)
+            //if (inputMedia is TLInputMediaGame gameMedia && gameMedia.Id is TLInputGameShortName shortName)
             //{
-            //    if (top == 0)
-            //    {
-            //        MaskTitleAndStatusBar();
-            //    }
-            //    else
-            //    {
-            //        SetupTitleAndStatusBar();
-            //    }
+            //    // TODO: maybe?
             //}
 
-            if (LineTop != null)
+            return ShowAsync();
+        }
+
+        public Task<ContentDialogResult> ShowAsync(User bot, string token = null)
+        {
+            ChatsPanel.SelectionMode = ListViewSelectionMode.Single;
+            ViewModel.SearchType = SearchChatsType.BasicAndSupergroups;
+            ViewModel.IsCommentEnabled = false;
+            ViewModel.IsSendAsCopyEnabled = false;
+
+            ViewModel.Clear();
+            ViewModel.InviteBot = bot;
+            ViewModel.InviteToken = token;
+
+            return ShowAsync();
+        }
+
+        private new Task<ContentDialogResult> ShowAsync()
+        {
+            ViewModel.Items.Clear();
+
+            RoutedEventHandler handler = null;
+            handler = new RoutedEventHandler(async (s, args) =>
             {
-                LineTop.BorderThickness = new Thickness(0, 0, 0, top);
-                LineAccent.BorderThickness = new Thickness(0, accent, 0, 0);
-                LineBottom.BorderThickness = new Thickness(0, bottom, 0, 0);
+                Loaded -= handler;
+                await ViewModel.OnNavigatedToAsync(null, NavigationMode.New, null);
+            });
+
+            Loaded += handler;
+            return this.ShowQueuedAsync();
+        }
+
+        #endregion
+
+        #region Recycle
+
+        private void OnChoosingItemContainer(ListViewBase sender, ChoosingItemContainerEventArgs args)
+        {
+            if (args.ItemContainer == null)
+            {
+                args.ItemContainer = new TextGridViewItem();
+                args.ItemContainer.Style = ChatsPanel.ItemContainerStyle;
+                args.ItemContainer.ContentTemplate = ChatsPanel.ItemTemplate;
+            }
+
+            args.IsContainerPrepared = true;
+        }
+
+        private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as StackPanel;
+            var chat = args.Item as Chat;
+
+            var photo = content.Children[0] as ProfilePicture;
+            var title = content.Children[1] as TextBlock;
+
+            photo.Source = PlaceholderHelper.GetChat(ViewModel.ProtoService, chat, 48);
+            title.Text = ViewModel.ProtoService.GetTitle(chat);
+        }
+
+        private void DialogsSearchListView_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.Item is SearchResult result)
+            {
+                var content = args.ItemContainer.ContentTemplateRoot as Grid;
+                if (content == null)
+                {
+                    return;
+                }
+
+                if (args.Phase == 0)
+                {
+                    var grid = content.Children[1] as Grid;
+
+                    var title = grid.Children[0] as TextBlock;
+                    if (result.Chat != null)
+                    {
+                        title.Text = ViewModel.ProtoService.GetTitle(result.Chat);
+                    }
+                    else if (result.User != null)
+                    {
+                        title.Text = result.User.GetFullName();
+                    }
+
+                    var verified = grid.Children[1] as FrameworkElement;
+
+                    if (result.User != null || result.Chat.Type is ChatTypePrivate || result.Chat.Type is ChatTypeSecret)
+                    {
+                        var user = result.User ?? ViewModel.ProtoService.GetUser(result.Chat);
+                        verified.Visibility = user != null && user.IsVerified ? Visibility.Visible : Visibility.Collapsed;
+                    }
+                    else if (result.Chat != null && result.Chat.Type is ChatTypeSupergroup supergroup)
+                    {
+                        var group = ViewModel.ProtoService.GetSupergroup(supergroup.SupergroupId);
+                        verified.Visibility = group != null && group.IsVerified ? Visibility.Visible : Visibility.Collapsed;
+                    }
+                    else
+                    {
+                        verified.Visibility = Visibility.Collapsed;
+                    }
+                }
+                else if (args.Phase == 1)
+                {
+                    var subtitle = content.Children[2] as TextBlock;
+                    if (result.User != null || result.Chat != null && result.Chat.Type is ChatTypePrivate privata)
+                    {
+                        var user = result.User ?? ViewModel.ProtoService.GetUser(result.Chat);
+                        if (result.IsPublic)
+                        {
+                            subtitle.Text = $"@{user.Username}";
+                        }
+                        else
+                        {
+                            subtitle.Text = LastSeenConverter.GetLabel(user, true);
+                        }
+                    }
+                    else if (result.Chat != null && result.Chat.Type is ChatTypeSupergroup super)
+                    {
+                        var supergroup = ViewModel.ProtoService.GetSupergroup(super.SupergroupId);
+                        if (result.IsPublic)
+                        {
+                            if (supergroup.MemberCount > 0)
+                            {
+                                subtitle.Text = string.Format("@{0}, {1}", supergroup.Username, Locale.Declension(supergroup.IsChannel ? "Subscribers" : "Members", supergroup.MemberCount));
+                            }
+                            else
+                            {
+                                subtitle.Text = $"@{supergroup.Username}";
+                            }
+                        }
+                        else if (supergroup.MemberCount > 0)
+                        {
+                            subtitle.Text = Locale.Declension(supergroup.IsChannel ? "Subscribers" : "Members", supergroup.MemberCount);
+                        }
+                        else
+                        {
+                            subtitle.Text = string.Empty;
+                        }
+                    }
+                    else
+                    {
+                        subtitle.Text = string.Empty;
+                    }
+
+                    if (ApiInformation.IsPropertyPresent("Windows.UI.Xaml.Controls.TextBlock", "TextHighlighters"))
+                    {
+                        if (subtitle.Text.StartsWith($"@{result.Query}", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var highligher = new TextHighlighter();
+                            highligher.Foreground = new SolidColorBrush(Colors.Red);
+                            highligher.Background = new SolidColorBrush(Colors.Transparent);
+                            highligher.Ranges.Add(new TextRange { StartIndex = 1, Length = result.Query.Length });
+
+                            subtitle.TextHighlighters.Add(highligher);
+                        }
+                        else
+                        {
+                            subtitle.TextHighlighters.Clear();
+                        }
+                    }
+                }
+                else if (args.Phase == 2)
+                {
+                    var photo = content.Children[0] as ProfilePicture;
+                    if (result.Chat != null)
+                    {
+                        photo.Source = PlaceholderHelper.GetChat(ViewModel.ProtoService, result.Chat, 36);
+                    }
+                    else if (result.User != null)
+                    {
+                        photo.Source = PlaceholderHelper.GetUser(ViewModel.ProtoService, result.User, 36);
+                    }
+                }
+
+                if (args.Phase < 2)
+                {
+                    args.RegisterUpdateCallback(DialogsSearchListView_ContainerContentChanging);
+                }
+            }
+
+            args.Handled = true;
+        }
+
+        private void TopChats_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as StackPanel;
+            var chat = args.Item as Chat;
+
+            var grid = content.Children[0] as Grid;
+
+            var photo = grid.Children[0] as ProfilePicture;
+            var title = content.Children[1] as TextBlock;
+
+            photo.Source = PlaceholderHelper.GetChat(ViewModel.ProtoService, chat, 48);
+            title.Text = ViewModel.ProtoService.GetTitle(chat, true);
+
+            var badge = grid.Children[1] as Border;
+            var text = badge.Child as TextBlock;
+
+            badge.Visibility = chat.UnreadCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+            text.Text = chat.UnreadCount.ToString();
+        }
+
+        #endregion
+
+        #region Search
+
+        private void Search_Click(object sender, RoutedEventArgs e)
+        {
+            MainHeader.Visibility = Visibility.Collapsed;
+            SearchField.Visibility = Visibility.Visible;
+
+            SearchField.Focus(FocusState.Keyboard);
+        }
+
+        private void Search_GotFocus(object sender, RoutedEventArgs e)
+        {
+            Search_TextChanged(null, null);
+        }
+
+        private void Search_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(SearchField.Text))
+            {
+                MainHeader.Visibility = Visibility.Visible;
+                SearchField.Visibility = Visibility.Collapsed;
+
+                this.Focus(FocusState.Programmatic);
+            }
+
+            Search_TextChanged(null, null);
+        }
+
+        private async void Search_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (SearchField.FocusState == FocusState.Unfocused && string.IsNullOrEmpty(SearchField.Text))
+            {
+                DialogsSearchListView.Visibility = Visibility.Collapsed;
+
+                ViewModel.TopChats = null;
+                ViewModel.Search = null;
+            }
+            else if (SearchField.FocusState != FocusState.Unfocused)
+            {
+                DialogsSearchListView.Visibility = Visibility.Visible;
+
+                if (string.IsNullOrEmpty(SearchField.Text))
+                {
+                    var top = ViewModel.TopChats = new TopChatsCollection(ViewModel.ProtoService, new TopChatCategoryUsers(), 30);
+                    await top.LoadMoreItemsAsync(0);
+                }
+                else
+                {
+                    ViewModel.TopChats = null;
+                }
+
+                var items = ViewModel.Search = new SearchChatsCollection(ViewModel.ProtoService, SearchField.Text, null, ViewModel.SearchType);
+                await items.LoadMoreItemsAsync(0);
+                await items.LoadMoreItemsAsync(1);
             }
         }
 
-        // SystemControlBackgroundChromeMediumLowBrush
-
-        private void SetupTitleAndStatusBar()
+        private void Search_KeyDown(object sender, KeyRoutedEventArgs e)
         {
-            var titlebar = ApplicationView.GetForCurrentView().TitleBar;
-            var backgroundBrush = Application.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-            var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
+            var activePanel = ChatsPanel;
+            var activeList = DialogsSearchListView;
+            var activeResults = ChatsResults;
 
-            titlebar.BackgroundColor = backgroundBrush.Color;
-            titlebar.ForegroundColor = foregroundBrush.Color;
-            titlebar.ButtonBackgroundColor = backgroundBrush.Color;
-            titlebar.ButtonForegroundColor = foregroundBrush.Color;
-
-            if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.StatusBar"))
+            if (activePanel.Visibility == Visibility.Visible)
             {
-                var statusBar = StatusBar.GetForCurrentView();
-                statusBar.BackgroundColor = backgroundBrush.Color;
-                statusBar.ForegroundColor = foregroundBrush.Color;
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.Up || e.Key == Windows.System.VirtualKey.Down)
+            {
+                var index = e.Key == Windows.System.VirtualKey.Up ? -1 : 1;
+                var next = activeList.SelectedIndex + index;
+                if (next >= 0 && next < activeResults.View.Count)
+                {
+                    activeList.SelectedIndex = next;
+                    activeList.ScrollIntoView(activeList.SelectedItem);
+                }
+
+                e.Handled = true;
+            }
+            else if (e.Key == Windows.System.VirtualKey.Enter)
+            {
+                var index = Math.Max(activeList.SelectedIndex, 0);
+                var container = activeList.ContainerFromIndex(index) as ListViewItem;
+                if (container != null)
+                {
+                    var peer = new ListViewItemAutomationPeer(container);
+                    var invokeProv = peer.GetPattern(PatternInterface.Invoke) as IInvokeProvider;
+                    invokeProv.Invoke();
+                }
+
+                e.Handled = true;
+            }
+        }
+
+        #endregion
+
+        #region Comment
+
+        private Visibility ConvertCommentVisibility(int count, bool enabled)
+        {
+            return count > 0 && enabled ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        #endregion
+
+        private void List_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ViewModel.SelectedItems = new MvxObservableCollection<Chat>(ChatsPanel.SelectedItems.Cast<Chat>());
+            Subtitle.Visibility = ViewModel.SelectedItems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            Subtitle.Text = string.Join(", ", ViewModel.SelectedItems.Select(x => ViewModel.CacheService.GetTitle(x)));
+
+            CommentPanel.Visibility = ViewModel.SelectedItems.Count > 0 && ViewModel.IsCommentEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+            IsPrimaryButtonEnabled = ViewModel.SelectedItems.Count > 0;
+        }
+
+        private async void ListView_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            var item = e.ClickedItem;
+            if (item is SearchResult result)
+            {
+                if (result.Chat != null)
+                {
+                    item = result.Chat;
+                    ViewModel.ProtoService.Send(new AddRecentlyFoundChat(result.Chat.Id));
+                }
+                else
+                {
+                    item = result.User;
+                }
+            }
+
+            if (item is User user)
+            {
+                var response = await ViewModel.ProtoService.SendAsync(new CreatePrivateChat(user.Id, false));
+                if (response is Chat)
+                {
+                    item = response as Chat;
+                }
+            }
+
+            var chat = item as Chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            chat = ViewModel.Items.FirstOrDefault(x => x.Id == chat.Id) ?? chat;
+            SearchField.Text = string.Empty;
+
+            var items = ViewModel.Items;
+            var selectedItems = ViewModel.SelectedItems;
+
+            var index = items.IndexOf(chat);
+            if (index > -1)
+            {
+                if (index > 0)
+                {
+                    items.Remove(chat);
+                    items.Insert(1, chat);
+                }
+            }
+            else
+            {
+                items.Insert(1, chat);
+            }
+
+            if (ChatsPanel.SelectionMode == ListViewSelectionMode.Multiple)
+            {
+                ChatsPanel.SelectedItems.Add(chat);
+            }
+            else
+            {
+                ChatsPanel.SelectedItem = chat;
             }
         }
 
         private void List_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            var itemWidth = (e.NewSize.Width - 24) / 5d;
-            var minHeigth = itemWidth * 3d - 12 + 48;
-            var top = Math.Max(0, e.NewSize.Height - minHeigth);
-
-            if (!IsFullScreenMode())
-            {
-                top = 0;
-            }
-
-            if (top == 0)
-            {
-                Header.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                Header.Visibility = Visibility.Visible;
-            }
-
-            Header.Height = top;
-
-            BackgroundPanel.Height = e.NewSize.Height;
-            BackgroundPanel.Margin = new Thickness(0, top, 0, -top);
-
-            if (_backgroundVisual != null && _expression != null && _expressionClip != null)
-            {
-                var brush = App.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-
-                _backgroundVisual.Brush = _backgroundVisual.Compositor.CreateColorBrush(brush.Color);
-                _backgroundVisual.Size = new System.Numerics.Vector2((float)e.NewSize.Width, (float)e.NewSize.Height);
-                _backgroundVisual.Clip = _backgroundVisual.Compositor.CreateInsetClip();
-
-                _expression.SetScalarParameter("Maximum", -(float)top + 1);
-                _backgroundVisual.StopAnimation("Offset.Y");
-                _backgroundVisual.StartAnimation("Offset.Y", _expression);
-
-                _expressionClip.SetScalarParameter("Maximum", -(float)top + 1);
-                _backgroundVisual.Clip.StopAnimation("Offset.Y");
-                _backgroundVisual.Clip.StartAnimation("Offset.Y", _expressionClip);
-            }
+            Header.Width = e.NewSize.Width;
+            DialogsSearchListView.Width = e.NewSize.Width;
+            DialogsSearchListView.Height = e.NewSize.Height;
         }
 
-        //protected override void UpdateView(Rect bounds)
-        //{
-        //    if (BackgroundElement == null) return;
-
-        //    BackgroundElement.MinHeight = bounds.Height;
-        //    BackgroundElement.BorderThickness = new Thickness(0);
-        //}
-
-        private void LightDismiss_Tapped(object sender, TappedRoutedEventArgs e)
+        private void OnOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
         {
-            Hide(ContentDialogBaseResult.None);
+            Window.Current.CoreWindow.CharacterReceived += OnCharacterReceived;
         }
 
-        private void Close_Click(object sender, RoutedEventArgs e)
+        private void OnClosing(ContentDialog sender, ContentDialogClosingEventArgs args)
         {
-            Hide(ContentDialogBaseResult.Cancel);
+            Window.Current.CoreWindow.CharacterReceived -= OnCharacterReceived;
         }
 
-        private void CopyLink_Click(object sender, RoutedEventArgs e)
+        private void OnCharacterReceived(CoreWindow sender, CharacterReceivedEventArgs args)
         {
-            DataTransferManager.ShowShareUI();
-        }
+            var character = System.Text.Encoding.UTF32.GetString(BitConverter.GetBytes(args.KeyCode));
+            if (character.Length == 0 || char.IsControl(character[0]) || char.IsWhiteSpace(character[0]))
+            {
+                return;
+            }
 
-        private void List_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            ViewModel.SelectedItems = new List<TLDialog>(List.SelectedItems.Cast<TLDialog>());
+            var focused = FocusManager.GetFocusedElement();
+            if (focused == null || (focused is TextBox == false && focused is RichEditBox == false))
+            {
+                Search_Click(null, null);
+                SearchField.Text = character;
+                SearchField.SelectionStart = character.Length;
+
+                args.Handled = true;
+            }
         }
     }
 }

@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
 using Unigram.Common;
 using Unigram.Converters;
 using Windows.Foundation;
@@ -17,14 +14,13 @@ using Windows.UI.Xaml.Data;
 using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
-
-// The Blank Page item template is documented at http://go.microsoft.com/fwlink/?LinkId=234238
+using Telegram.Td.Api;
+using Unigram.ViewModels;
+using Windows.UI.Xaml.Media.Imaging;
+using Windows.UI.Xaml.Documents;
 
 namespace Unigram.Controls.Messages
 {
-    /// <summary>
-    /// An empty page that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MessageReference : HyperlinkButton
     {
         public MessageReference()
@@ -32,19 +28,7 @@ namespace Unigram.Controls.Messages
             InitializeComponent();
         }
 
-        //public string Title
-        //{
-        //    get
-        //    {
-        //        return TitleLabel.Text;
-        //    }
-        //    set
-        //    {
-        //        TitleLabel.Text = value;
-        //    }
-        //}
-
-        public string Title { get; set; }
+        public long MessageId { get; private set; }
 
         #region Message
 
@@ -60,7 +44,7 @@ namespace Unigram.Controls.Messages
 
                 if (oldValue == value)
                 {
-                    SetTemplateCore(value);
+                    //SetTemplateCore(value);
                 }
             }
         }
@@ -70,337 +54,270 @@ namespace Unigram.Controls.Messages
 
         private static void OnMessageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
-            ((MessageReference)d).SetTemplateCore((object)e.NewValue);
+            ((MessageReference)d).UpdateEmbedData(e.NewValue as MessageComposerHeader);
+        }
+
+        private void UpdateEmbedData(MessageComposerHeader embedded)
+        {
+            if (embedded == null)
+            {
+                return;
+            }
+
+            if (embedded.WebPagePreview != null)
+            {
+                MessageId = 0;
+                Visibility = Visibility.Visible;
+
+                TitleLabel.Text = embedded.WebPagePreview.SiteName;
+                ServiceLabel.Text = string.Empty;
+
+                if (!string.IsNullOrEmpty(embedded.WebPagePreview.Title))
+                {
+                    MessageLabel.Text = embedded.WebPagePreview.Title;
+                }
+                else if (!string.IsNullOrEmpty(embedded.WebPagePreview.Author))
+                {
+                    MessageLabel.Text = embedded.WebPagePreview.Author;
+                }
+                else
+                {
+                    MessageLabel.Text = embedded.WebPagePreview.Url;
+                }
+            }
+            else if (embedded.EditingMessage != null)
+            {
+                MessageId = embedded.EditingMessage.Id;
+                GetMessageTemplate(embedded.EditingMessage, Strings.Resources.Edit);
+            }
+            else if (embedded.ReplyToMessage != null)
+            {
+                MessageId = embedded.ReplyToMessage.Id;
+                GetMessageTemplate(embedded.ReplyToMessage, null);
+            }
         }
 
         #endregion
 
-        private bool SetTemplateCore(object item)
+        public void Mockup(string sender, string message)
         {
-            if (item == null)
+            TitleLabel.Text = sender;
+            ServiceLabel.Text = string.Empty;
+            MessageLabel.Text = message;
+        }
+
+        public void UpdateMessageReply(MessageViewModel message)
+        {
+            if (message.ReplyToMessageId == 0)
             {
-                return SetUnsupportedTemplate(null, null);
+                Visibility = Visibility.Collapsed;
             }
-
-            var replyInfo = item as ReplyInfo;
-            if (replyInfo == null)
+            else if (message.ReplyToMessage != null)
             {
-                if (item is TLMessageBase)
-                {
-                    return GetMessageTemplate(item as TLObject);
-                }
-
-                return SetUnsupportedTemplate(null, null);
+                GetMessageTemplate(message.ReplyToMessage, null);
             }
-            else
+            else if (message.ReplyToMessageState == ReplyToMessageState.Loading)
             {
-                if (replyInfo.Reply == null)
-                {
-                    //return ReplyLoadingTemplate;
-                }
-
-                var contain = replyInfo.Reply as TLMessagesContainter;
-                if (contain != null)
-                {
-                    return GetMessagesContainerTemplate(contain);
-                }
-
-                if (replyInfo.ReplyToMsgId == null || replyInfo.ReplyToMsgId.Value == 0)
-                {
-                    return SetUnsupportedTemplate(null, null);
-                }
-
-                return GetMessageTemplate(replyInfo.Reply);
+                SetLoadingTemplate(null, null);
+            }
+            else if (message.ReplyToMessageState == ReplyToMessageState.Deleted)
+            {
+                SetEmptyTemplate(null, null);
             }
         }
 
-        #region Container
-
-        private bool GetMessagesContainerTemplate(TLMessagesContainter container)
+        public void UpdateMessage(MessageViewModel message, bool loading, string title)
         {
-            //if (container.WebPageMedia != null)
+            if (loading)
+            {
+                SetLoadingTemplate(null, title);
+            }
+            else
+            {
+                MessageId = message.Id;
+                GetMessageTemplate(message, title);
+            }
+        }
+
+        public void UpdateFile(MessageViewModel message, File file)
+        {
+            // TODO: maybe something better...
+            UpdateMessageReply(message);
+        }
+
+        private void UpdateThumbnail(MessageViewModel message, PhotoSize photoSize)
+        {
+            if (photoSize.Photo.Local.IsDownloadingCompleted)
+            {
+                double ratioX = (double)36 / photoSize.Width;
+                double ratioY = (double)36 / photoSize.Height;
+                double ratio = Math.Max(ratioX, ratioY);
+
+                var width = (int)(photoSize.Width * ratio);
+                var height = (int)(photoSize.Height * ratio);
+
+                ThumbImage.ImageSource = new BitmapImage(new Uri("file:///" + photoSize.Photo.Local.Path)) { DecodePixelWidth = width, DecodePixelHeight = height, DecodePixelType = DecodePixelType.Logical };
+            }
+            else if (photoSize.Photo.Local.CanBeDownloaded && !photoSize.Photo.Local.IsDownloadingActive)
+            {
+                ThumbImage.ImageSource = null;
+                message.ProtoService.DownloadFile(photoSize.Photo.Id, 1);
+            }
+        }
+
+        #region Reply
+
+        private bool GetMessageTemplate(MessageViewModel message, string title)
+        {
+            switch (message.Content)
+            {
+                case MessageText text:
+                    return SetTextTemplate(message, text, title);
+                case MessageAnimation animation:
+                    return SetAnimationTemplate(message, animation, title);
+                case MessageAudio audio:
+                    return SetAudioTemplate(message, audio, title);
+                case MessageCall call:
+                    return SetCallTemplate(message, call, title);
+                case MessageContact contact:
+                    return SetContactTemplate(message, contact, title);
+                case MessageDocument document:
+                    return SetDocumentTemplate(message, document, title);
+                case MessageGame game:
+                    return SetGameTemplate(message, game, title);
+                case MessageInvoice invoice:
+                    return SetInvoiceTemplate(message, invoice, title);
+                case MessageLocation location:
+                    return SetLocationTemplate(message, location, title);
+                case MessagePhoto photo:
+                    return SetPhotoTemplate(message, photo, title);
+                case MessagePoll poll:
+                    return SetPollTemplate(message, poll, title);
+                case MessageSticker sticker:
+                    return SetStickerTemplate(message, sticker, title);
+                case MessageUnsupported unsupported:
+                    return SetUnsupportedMediaTemplate(message, title);
+                case MessageVenue venue:
+                    return SetVenueTemplate(message, venue, title);
+                case MessageVideo video:
+                    return SetVideoTemplate(message, video, title);
+                case MessageVideoNote videoNote:
+                    return SetVideoNoteTemplate(message, videoNote, title);
+                case MessageVoiceNote voiceNote:
+                    return SetVoiceNoteTemplate(message, voiceNote, title);
+
+                case MessageBasicGroupChatCreate basicGroupChatCreate:
+                case MessageChatAddMembers chatAddMembers:
+                case MessageChatChangePhoto chatChangePhoto:
+                case MessageChatChangeTitle chatChangeTitle:
+                case MessageChatDeleteMember chatDeleteMember:
+                case MessageChatDeletePhoto chatDeletePhoto:
+                case MessageChatJoinByLink chatJoinByLink:
+                case MessageChatSetTtl chatSetTtl:
+                case MessageChatUpgradeFrom chatUpgradeFrom:
+                case MessageChatUpgradeTo chatUpgradeTo:
+                case MessageContactRegistered contactRegistered:
+                case MessageCustomServiceAction customServiceAction:
+                case MessageGameScore gameScore:
+                case MessagePaymentSuccessful paymentSuccessful:
+                case MessagePinMessage pinMessage:
+                case MessageScreenshotTaken screenshotTaken:
+                case MessageSupergroupChatCreate supergroupChatCreate:
+                    return SetServiceTextTemplate(message, title);
+                case MessageExpiredPhoto expiredPhoto:
+                case MessageExpiredVideo expiredVideo:
+                    return SetServiceTextTemplate(message, title);
+            }
+
+            Visibility = Visibility.Collapsed;
+            return false;
+
+            //var message = obj as TLMessage;
+            //if (message != null)
             //{
-            //    var webpageMedia = container.WebPageMedia as TLMessageMediaWebPage;
-            //    if (webpageMedia != null)
+            //    if (!string.IsNullOrEmpty(message.Message) && (message.Media == null || message.Media is TLMessageMediaEmpty))
             //    {
-            //        var pendingWebpage = webpageMedia.Webpage as TLWebPagePending;
-            //        if (pendingWebpage != null)
-            //        {
-            //            return WebPagePendingTemplate;
-            //        }
+            //        return SetTextTemplate(message, Title);
+            //    }
 
-            //        var webpage = webpageMedia.Webpage as TLWebPage;
-            //        if (webpage != null)
+            //    var media = message.Media;
+            //    if (media != null)
+            //    {
+            //        switch (media.TypeId)
             //        {
-            //            return WebPageTemplate;
-            //        }
+            //            case TLType.MessageMediaPhoto:
+            //                return SetPhotoTemplate(message, Title);
+            //            case TLType.MessageMediaGeo:
+            //                return SetGeoTemplate(message, Title);
+            //            case TLType.MessageMediaGeoLive:
+            //                return SetGeoLiveTemplate(message, Title);
+            //            case TLType.MessageMediaVenue:
+            //                return SetVenueTemplate(message, Title);
+            //            case TLType.MessageMediaContact:
+            //                return SetContactTemplate(message, Title);
+            //            case TLType.MessageMediaGame:
+            //                return SetGameTemplate(message, Title);
+            //            case TLType.MessageMediaEmpty:
+            //                return SetUnsupportedTemplate(message, Title);
+            //            case TLType.MessageMediaWebPage:
+            //                return SetWebPageTemplate(message, Title);
+            //            case TLType.MessageMediaDocument:
+            //                if (message.IsSticker())
+            //                {
+            //                    return SetStickerTemplate(message, Title);
+            //                }
+            //                else if (message.IsGif())
+            //                {
+            //                    return SetGifTemplate(message, Title);
+            //                }
+            //                else if (message.IsVoice())
+            //                {
+            //                    return SetVoiceMessageTemplate(message, Title);
+            //                }
+            //                else if (message.IsVideo())
+            //                {
+            //                    return SetVideoTemplate(message, Title);
+            //                }
+            //                else if (message.IsRoundVideo())
+            //                {
+            //                    return SetRoundVideoTemplate(message, Title);
+            //                }
+            //                else if (message.IsAudio())
+            //                {
+            //                    return SetAudioTemplate(message, Title);
+            //                }
 
-            //        var emptyWebpage = webpageMedia.Webpage as TLWebPageEmpty;
-            //        if (emptyWebpage != null)
-            //        {
-            //            return WebPageEmptyTemplate;
+            //                return SetDocumentTemplate(message, Title);
+            //            case TLType.MessageMediaUnsupported:
+            //                return SetUnsupportedMediaTemplate(message, Title);
             //        }
             //    }
             //}
 
-            if (container.FwdMessages != null)
-            {
-                if (container.FwdMessages.Count == 1)
-                {
-                    var forwardMessage = container.FwdMessages[0];
-                    if (forwardMessage != null)
-                    {
-                        if (!string.IsNullOrEmpty(forwardMessage.Message) && (forwardMessage.Media == null || forwardMessage.Media is TLMessageMediaEmpty || forwardMessage.Media is TLMessageMediaWebPage))
-                        {
-                            return SetTextTemplate(forwardMessage, "forward");
-                        }
+            //var serviceMessage = obj as TLMessageService;
+            //if (serviceMessage != null)
+            //{
+            //    var action = serviceMessage.Action;
+            //    if (action is TLMessageActionChatEditPhoto)
+            //    {
+            //        return SetServicePhotoTemplate(serviceMessage, Title);
+            //    }
 
-                        var media = container.FwdMessages[0].Media;
-                        if (media != null)
-                        {
-                            switch (media.TypeId)
-                            {
-                                case TLType.MessageMediaPhoto:
-                                    return SetPhotoTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaGeo:
-                                    return SetGeoTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaGeoLive:
-                                    return SetGeoLiveTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaVenue:
-                                    return SetVenueTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaContact:
-                                    return SetContactTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaGame:
-                                    return SetGameTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaEmpty:
-                                    return SetUnsupportedTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaDocument:
-                                    if (forwardMessage.IsSticker())
-                                    {
-                                        return SetStickerTemplate(forwardMessage, "forward");
-                                    }
-                                    else if (forwardMessage.IsGif())
-                                    {
-                                        return SetGifTemplate(forwardMessage, "forward");
-                                    }
-                                    else if (forwardMessage.IsVoice())
-                                    {
-                                        return SetVoiceMessageTemplate(forwardMessage, "forward");
-                                    }
-                                    else if (forwardMessage.IsVideo())
-                                    {
-                                        return SetVideoTemplate(forwardMessage, "forward");
-                                    }
-                                    else if (forwardMessage.IsRoundVideo())
-                                    {
-                                        return SetRoundVideoTemplate(forwardMessage, "forward");
-                                    }
-                                    else if (forwardMessage.IsAudio())
-                                    {
-                                        return SetAudioTemplate(forwardMessage, "forward");
-                                    }
+            //    return SetServiceTextTemplate(serviceMessage, Title);
+            //}
+            //else
+            //{
+            //    var emptyMessage = obj as TLMessageEmpty;
+            //    if (emptyMessage != null)
+            //    {
+            //        return SetEmptyTemplate(emptyMessage, Title);
+            //    }
 
-                                    return SetDocumentTemplate(forwardMessage, "forward");
-                                case TLType.MessageMediaUnsupported:
-                                    return SetUnsupportedMediaTemplate(forwardMessage, "forward");
-                            }
-                        }
-                    }
-                }
-
-                return SetForwardedMessagesTemplate(container.FwdMessages);
-            }
-
-            if (container.EditMessage != null)
-            {
-                var editMessage = container.EditMessage;
-                if (editMessage != null)
-                {
-                    if (!string.IsNullOrEmpty(editMessage.Message) && (editMessage.Media == null || editMessage.Media is TLMessageMediaEmpty || editMessage.Media is TLMessageMediaWebPage))
-                    {
-                        return SetTextTemplate(editMessage, "Edit message");
-                    }
-
-                    var media = editMessage.Media;
-                    if (media != null)
-                    {
-                        switch (media.TypeId)
-                        {
-                            case TLType.MessageMediaPhoto:
-                                return SetPhotoTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaGeo:
-                                return SetGeoTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaGeoLive:
-                                return SetGeoLiveTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaVenue:
-                                return SetVenueTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaContact:
-                                return SetContactTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaGame:
-                                return SetGameTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaEmpty:
-                                return SetUnsupportedTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaDocument:
-                                if (editMessage.IsSticker())
-                                {
-                                    return SetStickerTemplate(editMessage, "Edit message");
-                                }
-                                else if (editMessage.IsGif())
-                                {
-                                    return SetGifTemplate(editMessage, "Edit message");
-                                }
-                                else if (editMessage.IsVoice())
-                                {
-                                    return SetVoiceMessageTemplate(editMessage, "Edit message");
-                                }
-                                else if (editMessage.IsVideo())
-                                {
-                                    return SetVideoTemplate(editMessage, "Edit message");
-                                }
-                                else if (editMessage.IsRoundVideo())
-                                {
-                                    return SetRoundVideoTemplate(editMessage, "Edit message");
-                                }
-                                else if (editMessage.IsAudio())
-                                {
-                                    return SetAudioTemplate(editMessage, "Edit message");
-                                }
-
-                                return SetDocumentTemplate(editMessage, "Edit message");
-                            case TLType.MessageMediaUnsupported:
-                                return SetUnsupportedMediaTemplate(editMessage, "Edit message");
-                        }
-                    }
-                }
-
-                return SetUnsupportedTemplate(editMessage, "Edit message");
-            }
-
-            return SetUnsupportedTemplate(null, "Edit message");
+            //    return SetUnsupportedTemplate(message, Title);
+            //}
         }
 
-        #endregion
-
-        #region Reply
-
-        private bool GetMessageTemplate(TLObject obj)
-        {
-            Visibility = Visibility.Collapsed;
-
-            var message = obj as TLMessage;
-            if (message != null)
-            {
-                if (!string.IsNullOrEmpty(message.Message) && (message.Media == null || message.Media is TLMessageMediaEmpty))
-                {
-                    return SetTextTemplate(message, Title);
-                }
-
-                var media = message.Media;
-                if (media != null)
-                {
-                    switch (media.TypeId)
-                    {
-                        case TLType.MessageMediaPhoto:
-                            return SetPhotoTemplate(message, Title);
-                        case TLType.MessageMediaGeo:
-                            return SetGeoTemplate(message, Title);
-                        case TLType.MessageMediaGeoLive:
-                            return SetGeoLiveTemplate(message, Title);
-                        case TLType.MessageMediaVenue:
-                            return SetVenueTemplate(message, Title);
-                        case TLType.MessageMediaContact:
-                            return SetContactTemplate(message, Title);
-                        case TLType.MessageMediaGame:
-                            return SetGameTemplate(message, Title);
-                        case TLType.MessageMediaEmpty:
-                            return SetUnsupportedTemplate(message, Title);
-                        case TLType.MessageMediaWebPage:
-                            return SetWebPageTemplate(message, Title);
-                        case TLType.MessageMediaDocument:
-                            if (message.IsSticker())
-                            {
-                                return SetStickerTemplate(message, Title);
-                            }
-                            else if (message.IsGif())
-                            {
-                                return SetGifTemplate(message, Title);
-                            }
-                            else if (message.IsVoice())
-                            {
-                                return SetVoiceMessageTemplate(message, Title);
-                            }
-                            else if (message.IsVideo())
-                            {
-                                return SetVideoTemplate(message, Title);
-                            }
-                            else if (message.IsRoundVideo())
-                            {
-                                return SetRoundVideoTemplate(message, Title);
-                            }
-                            else if (message.IsAudio())
-                            {
-                                return SetAudioTemplate(message, Title);
-                            }
-
-                            return SetDocumentTemplate(message, Title);
-                        case TLType.MessageMediaUnsupported:
-                            return SetUnsupportedMediaTemplate(message, Title);
-                    }
-                }
-            }
-
-            var serviceMessage = obj as TLMessageService;
-            if (serviceMessage != null)
-            {
-                var action = serviceMessage.Action;
-                if (action is TLMessageActionChatEditPhoto)
-                {
-                    return SetServicePhotoTemplate(serviceMessage, Title);
-                }
-
-                return SetServiceTextTemplate(serviceMessage, Title);
-            }
-            else
-            {
-                var emptyMessage = obj as TLMessageEmpty;
-                if (emptyMessage != null)
-                {
-                    return SetEmptyTemplate(emptyMessage, Title);
-                }
-
-                return SetUnsupportedTemplate(message, Title);
-            }
-        }
-
-        private bool SetForwardedMessagesTemplate(TLVector<TLMessage> messages)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = string.Empty;
-            ServiceLabel.Text = $"{messages.Count} forwarded messages";
-            MessageLabel.Text = string.Empty;
-
-            var users = messages.Select(x => x.From).Distinct(new LambdaComparer<TLUser>((x, y) => x.Id == y.Id)).ToList();
-            if (users.Count > 2)
-            {
-                TitleLabel.Text = $"{users[0].FullName} and {users.Count - 1} others";
-            }
-            else if (users.Count == 2)
-            {
-                TitleLabel.Text = $"{users[0].FullName} and {users[1].FullName}";
-            }
-            else if (users.Count == 1)
-            {
-                TitleLabel.Text = users[0].FullName;
-            }
-
-            return true;
-        }
-
-        private bool SetTextTemplate(TLMessage message, string title)
+        private bool SetTextTemplate(MessageViewModel message, MessageText text, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -409,98 +326,111 @@ namespace Unigram.Controls.Messages
 
             TitleLabel.Text = GetFromLabel(message, title);
             ServiceLabel.Text = string.Empty;
-            MessageLabel.Text = message.Message.Replace("\r\n", "\n").Replace('\n', ' ');
+            MessageLabel.Text = text.Text.Text.Replace("\r\n", "\n").Replace('\n', ' ');
 
             return true;
         }
 
-        private bool SetPhotoTemplate(TLMessage message, string title)
+        private bool SetPhotoTemplate(MessageViewModel message, MessagePhoto photo, string title)
         {
             Visibility = Visibility.Visible;
 
             // 🖼
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Photo";
+            ServiceLabel.Text = Strings.Resources.AttachPhoto;
             MessageLabel.Text = string.Empty;
 
-            if (message.Media is TLMessageMediaPhoto photoMedia)
+            if (message.Ttl > 0)
             {
-                if (photoMedia.HasTTLSeconds)
-                {
-                    if (ThumbRoot != null)
-                        ThumbRoot.Visibility = Visibility.Collapsed;
-                }
-                else
-                {
-                    FindName(nameof(ThumbRoot));
-                    if (ThumbRoot != null)
-                        ThumbRoot.Visibility = Visibility.Visible;
+                if (ThumbRoot != null)
+                    ThumbRoot.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                FindName(nameof(ThumbRoot));
+                if (ThumbRoot != null)
+                    ThumbRoot.Visibility = Visibility.Visible;
 
-                    ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                    ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(photoMedia, true);
-                }
+                ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+                //ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(photoMedia, true);
 
-                if (!string.IsNullOrWhiteSpace(photoMedia.Caption))
+                var small = photo.Photo.GetSmall();
+                if (small != null)
                 {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += photoMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
+                    UpdateThumbnail(message, small);
                 }
             }
 
-            return true;
-        }
-
-        private bool SetGeoTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Location";
-            MessageLabel.Text = string.Empty;
-
-            return true;
-        }
-
-        private bool SetGeoLiveTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Live Location";
-            MessageLabel.Text = string.Empty;
-
-            return true;
-        }
-
-        private bool SetVenueTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Location";
-            MessageLabel.Text = string.Empty;
-
-            var venueMedia = message.Media as TLMessageMediaVenue;
-            if (venueMedia != null && !string.IsNullOrWhiteSpace(venueMedia.Title))
+            if (photo.Caption != null && !string.IsNullOrWhiteSpace(photo.Caption.Text))
             {
                 ServiceLabel.Text += ", ";
-                MessageLabel.Text = venueMedia.Title.Replace("\r\n", "\n").Replace('\n', ' ');
+                MessageLabel.Text += photo.Caption.Text.Replace("\r\n", "\n").Replace('\n', ' ');
             }
 
             return true;
         }
 
-        private bool SetGameTemplate(TLMessage message, string title)
+        private bool SetInvoiceTemplate(MessageViewModel message, MessageInvoice invoice, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = invoice.Title;
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetLocationTemplate(MessageViewModel message, MessageLocation location, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = location.LivePeriod > 0 ? Strings.Resources.AttachLiveLocation : Strings.Resources.AttachLocation;
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetVenueTemplate(MessageViewModel message, MessageVenue venue, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = Strings.Resources.AttachLocation + ", " + venue.Venue.Title.Replace("\r\n", "\n").Replace('\n', ' ');
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetCallTemplate(MessageViewModel message, MessageCall call, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            var outgoing = message.IsOutgoing;
+            var missed = call.DiscardReason is CallDiscardReasonMissed || call.DiscardReason is CallDiscardReasonDeclined;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = missed ? (outgoing ? Strings.Resources.CallMessageOutgoingMissed : Strings.Resources.CallMessageIncomingMissed) : (outgoing ? Strings.Resources.CallMessageOutgoing : Strings.Resources.CallMessageIncoming);
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetGameTemplate(MessageViewModel message, MessageGame game, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -509,155 +439,161 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Visible;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "🎮 Game";
+            ServiceLabel.Text = $"\uD83C\uDFAE {game.Game.Title}";
             MessageLabel.Text = string.Empty;
 
-            var gameMedia = message.Media as TLMessageMediaGame;
-            if (gameMedia != null && gameMedia.Game != null)
+            ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+
+            var thumbnail = game.Game.Photo?.GetSmall();
+            if (thumbnail != null)
             {
-                ServiceLabel.Text = $"🎮 {gameMedia.Game.Title}";
+                UpdateThumbnail(message, thumbnail);
+            }
+
+            return true;
+        }
+
+        private bool SetContactTemplate(MessageViewModel message, MessageContact contact, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = Strings.Resources.AttachContact;
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetAudioTemplate(MessageViewModel message, MessageAudio audio, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = Strings.Resources.AttachMusic;
+            MessageLabel.Text = string.Empty;
+
+            //var document = documentMedia.Document as TLDocument;
+            //if (document != null)
+            //{
+            //    ServiceLabel.Text = document.Title;
+            //}
+
+            if (audio.Caption != null && !string.IsNullOrWhiteSpace(audio.Caption.Text))
+            {
+                ServiceLabel.Text += ", ";
+                MessageLabel.Text += audio.Caption.Text.Replace('\n', ' ');
+            }
+
+            return true;
+        }
+
+        private bool SetPollTemplate(MessageViewModel message, MessagePoll poll, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = $"\uD83D\uDCCA {poll.Poll.Question.Replace("\r\n", "\n").Replace('\n', ' ')}";
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetVoiceNoteTemplate(MessageViewModel message, MessageVoiceNote voiceNote, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = Strings.Resources.AttachAudio;
+            MessageLabel.Text = string.Empty;
+
+            if (voiceNote.Caption != null && !string.IsNullOrWhiteSpace(voiceNote.Caption.Text))
+            {
+                ServiceLabel.Text += ", ";
+                MessageLabel.Text += voiceNote.Caption.Text.Replace("\r\n", "\n").Replace('\n', ' ');
+            }
+
+            return true;
+        }
+
+        private bool SetWebPageTemplate(MessageViewModel message, MessageText text, string title)
+        {
+            //var webPageMedia = message.Media as TLMessageMediaWebPage;
+            //if (webPageMedia != null)
+            //{
+            //    var webPage = webPageMedia.WebPage as TLWebPage;
+            //    if (webPage != null && webPage.Photo != null && webPage.Type != null)
+            //    {
+            //        Visibility = Visibility.Visible;
+
+            //        FindName(nameof(ThumbRoot));
+            //        if (ThumbRoot != null)
+            //            ThumbRoot.Visibility = Visibility.Visible;
+
+            //        TitleLabel.Text = GetFromLabel(message, title);
+            //        ServiceLabel.Text = string.Empty;
+            //        MessageLabel.Text = message.Message.Replace("\r\n", "\n").Replace('\n', ' ');
+
+            //        ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+            //        ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(webPage.Photo, true);
+            //    }
+            //    else
+            //    {
+            //        return SetTextTemplate(message, title);
+            //    }
+            //}
+
+            return true;
+        }
+
+        private bool SetVideoTemplate(MessageViewModel message, MessageVideo video, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = Strings.Resources.AttachVideo;
+            MessageLabel.Text = string.Empty;
+
+            if (message.Ttl > 0)
+            {
+                if (ThumbRoot != null)
+                    ThumbRoot.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                FindName(nameof(ThumbRoot));
+                if (ThumbRoot != null)
+                    ThumbRoot.Visibility = Visibility.Visible;
 
                 ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(gameMedia.Game.Photo, true);
+
+                if (video.Video.Thumbnail != null)
+                {
+                    UpdateThumbnail(message, video.Video.Thumbnail);
+                }
             }
 
-            return true;
-        }
-
-        private bool SetContactTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Contact";
-            MessageLabel.Text = string.Empty;
-
-            return true;
-        }
-
-        private bool SetAudioTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Audio";
-            MessageLabel.Text = string.Empty;
-
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
+            if (video.Caption != null && !string.IsNullOrWhiteSpace(video.Caption.Text))
             {
-                var document = documentMedia.Document as TLDocument;
-                if (document != null)
-                {
-                    ServiceLabel.Text = document.Title;
-                }
-
-                if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += documentMedia.Caption.Replace('\n', ' ');
-                }
+                ServiceLabel.Text += ", ";
+                MessageLabel.Text += video.Caption.Text.Replace("\r\n", "\n").Replace('\n', ' ');
             }
 
             return true;
         }
 
-        private bool SetVoiceMessageTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Collapsed;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Voice message";
-            MessageLabel.Text = string.Empty;
-
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
-            {
-                if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
-                }
-            }
-
-            return true;
-        }
-
-        private bool SetWebPageTemplate(TLMessage message, string title)
-        {
-            var webPageMedia = message.Media as TLMessageMediaWebPage;
-            if (webPageMedia != null)
-            {
-                var webPage = webPageMedia.WebPage as TLWebPage;
-                if (webPage != null && webPage.Photo != null && webPage.Type != null)
-                {
-                    Visibility = Visibility.Visible;
-
-                    FindName(nameof(ThumbRoot));
-                    if (ThumbRoot != null)
-                        ThumbRoot.Visibility = Visibility.Visible;
-
-                    TitleLabel.Text = GetFromLabel(message, title);
-                    ServiceLabel.Text = string.Empty;
-                    MessageLabel.Text = message.Message.Replace("\r\n", "\n").Replace('\n', ' ');
-
-                    ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                    ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(webPage.Photo, true);
-                }
-                else
-                {
-                    return SetTextTemplate(message, title);
-                }
-            }
-
-            return true;
-        }
-
-        private bool SetVideoTemplate(TLMessage message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Video";
-            MessageLabel.Text = string.Empty;
-
-            if (message.Media is TLMessageMediaDocument documentMedia)
-            {
-                if (documentMedia.HasTTLSeconds)
-                {
-                    if (ThumbRoot != null)
-                        ThumbRoot.Visibility = Visibility.Collapsed;
-                }
-                else
-                {
-                    FindName(nameof(ThumbRoot));
-                    if (ThumbRoot != null)
-                        ThumbRoot.Visibility = Visibility.Visible;
-
-                    ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                    ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(documentMedia.Document, true);
-                }
-
-                if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
-                }
-            }
-
-            return true;
-        }
-
-        private bool SetRoundVideoTemplate(TLMessage message, string title)
+        private bool SetVideoNoteTemplate(MessageViewModel message, MessageVideoNote videoNote, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -666,26 +602,20 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Visible;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Video message";
+            ServiceLabel.Text = Strings.Resources.AttachRound;
             MessageLabel.Text = string.Empty;
 
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
-            {
-                if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
-                }
+            ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = new CornerRadius(18);
 
-                ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = new CornerRadius(18);
-                ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(documentMedia.Document, true);
+            if (videoNote.VideoNote.Thumbnail != null)
+            {
+                UpdateThumbnail(message, videoNote.VideoNote.Thumbnail);
             }
 
             return true;
         }
 
-        private bool SetGifTemplate(TLMessage message, string title)
+        private bool SetAnimationTemplate(MessageViewModel message, MessageAnimation animation, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -694,26 +624,26 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Visible;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "GIF";
+            ServiceLabel.Text = Strings.Resources.AttachGif;
             MessageLabel.Text = string.Empty;
 
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
+            if (animation.Caption != null && !string.IsNullOrWhiteSpace(animation.Caption.Text))
             {
-                if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                {
-                    ServiceLabel.Text += ", ";
-                    MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
-                }
+                ServiceLabel.Text += ", ";
+                MessageLabel.Text += animation.Caption.Text.Replace("\r\n", "\n").Replace('\n', ' ');
+            }
 
-                ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(documentMedia.Document, true);
+            ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+
+            if (animation.Animation.Thumbnail != null)
+            {
+                UpdateThumbnail(message, animation.Animation.Thumbnail);
             }
 
             return true;
         }
 
-        private bool SetStickerTemplate(TLMessage message, string title)
+        private bool SetStickerTemplate(MessageViewModel message, MessageSticker sticker, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -721,73 +651,13 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Collapsed;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Sticker";
+            ServiceLabel.Text = string.IsNullOrEmpty(sticker.Sticker.Emoji) ? Strings.Resources.AttachSticker : $"{sticker.Sticker.Emoji} {Strings.Resources.AttachSticker}";
             MessageLabel.Text = string.Empty;
 
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
-            {
-                var document = documentMedia.Document as TLDocument;
-                if (document != null)
-                {
-                    var attribute = document.Attributes.OfType<TLDocumentAttributeSticker>().FirstOrDefault();
-                    if (attribute != null)
-                    {
-                        if (!string.IsNullOrEmpty(attribute.Alt))
-                        {
-                            ServiceLabel.Text = $"{attribute.Alt} Sticker";
-                        }
-                    }
-                }
-            }
-
             return true;
         }
 
-        private bool SetDocumentTemplate(TLMessage message, string title)
-        {
-            var documentMedia = message.Media as TLMessageMediaDocument;
-            if (documentMedia != null)
-            {
-                var document = documentMedia.Document as TLDocument;
-                if (document != null)
-                {
-                    var photoSize = document.Thumb as TLPhotoSize;
-                    var photoCachedSize = document.Thumb as TLPhotoCachedSize;
-                    if (photoCachedSize != null || photoSize != null)
-                    {
-                        Visibility = Visibility.Visible;
-
-                        FindName(nameof(ThumbRoot));
-                        if (ThumbRoot != null)
-                            ThumbRoot.Visibility = Visibility.Visible;
-
-                        ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                        ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(documentMedia.Document, true);
-                    }
-                    else
-                    {
-                        Visibility = Visibility.Visible;
-
-                        if (ThumbRoot != null)
-                            ThumbRoot.Visibility = Visibility.Collapsed;
-                    }
-
-                    TitleLabel.Text = GetFromLabel(message, title);
-                    ServiceLabel.Text = document.FileName;
-                    MessageLabel.Text = string.Empty;
-
-                    if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
-                    {
-                        ServiceLabel.Text += ", ";
-                        MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
-                    }
-                }
-            }
-            return true;
-        }
-
-        private bool SetServiceTextTemplate(TLMessageService message, string title)
+        private bool SetDocumentTemplate(MessageViewModel message, MessageDocument document, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -795,35 +665,95 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Collapsed;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = string.Empty;
-            MessageLabel.Text = ServiceHelper.Convert(message);
+            ServiceLabel.Text = document.Document.FileName;
+            MessageLabel.Text = string.Empty;
 
-            return true;
-        }
-
-        private bool SetServicePhotoTemplate(TLMessageService message, string title)
-        {
-            Visibility = Visibility.Visible;
-
-            FindName(nameof(ThumbRoot));
-            if (ThumbRoot != null)
-                ThumbRoot.Visibility = Visibility.Visible;
-
-            TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = string.Empty;
-            MessageLabel.Text = ServiceHelper.Convert(message);
-
-            var action = message.Action as TLMessageActionChatEditPhoto;
-            if (action != null)
+            if (document.Caption != null && !string.IsNullOrWhiteSpace(document.Caption.Text))
             {
-                ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
-                ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(action.Photo, true);
+                ServiceLabel.Text += ", ";
+                MessageLabel.Text += document.Caption.Text.Replace("\r\n", "\n").Replace('\n', ' ');
             }
 
             return true;
+
+            //var documentMedia = message.Media as TLMessageMediaDocument;
+            //if (documentMedia != null)
+            //{
+            //    var document = documentMedia.Document as TLDocument;
+            //    if (document != null)
+            //    {
+            //        var photoSize = document.Thumb as TLPhotoSize;
+            //        var photoCachedSize = document.Thumb as TLPhotoCachedSize;
+            //        if (photoCachedSize != null || photoSize != null)
+            //        {
+            //            Visibility = Visibility.Visible;
+
+            //            FindName(nameof(ThumbRoot));
+            //            if (ThumbRoot != null)
+            //                ThumbRoot.Visibility = Visibility.Visible;
+
+            //            ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+            //            ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(documentMedia.Document, true);
+            //        }
+            //        else
+            //        {
+            //            Visibility = Visibility.Visible;
+
+            //            if (ThumbRoot != null)
+            //                ThumbRoot.Visibility = Visibility.Collapsed;
+            //        }
+
+            //        TitleLabel.Text = GetFromLabel(message, title);
+            //        ServiceLabel.Text = document.FileName;
+            //        MessageLabel.Text = string.Empty;
+
+            //        if (!string.IsNullOrWhiteSpace(documentMedia.Caption))
+            //        {
+            //            ServiceLabel.Text += ", ";
+            //            MessageLabel.Text += documentMedia.Caption.Replace("\r\n", "\n").Replace('\n', ' ');
+            //        }
+            //    }
+            //}
+            return true;
         }
 
-        private bool SetEmptyTemplate(TLMessageBase message, string title)
+        private bool SetServiceTextTemplate(MessageViewModel message, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = GetFromLabel(message, title);
+            ServiceLabel.Text = MessageService.GetText(message);
+            MessageLabel.Text = string.Empty;
+
+            return true;
+        }
+
+        private bool SetServicePhotoTemplate(MessageViewModel message, string title)
+        {
+            //Visibility = Visibility.Visible;
+
+            //FindName(nameof(ThumbRoot));
+            //if (ThumbRoot != null)
+            //    ThumbRoot.Visibility = Visibility.Visible;
+
+            //TitleLabel.Text = GetFromLabel(message, title);
+            //ServiceLabel.Text = string.Empty;
+            //MessageLabel.Text = LegacyServiceHelper.Convert(message);
+
+            //var action = message.Action as TLMessageActionChatEditPhoto;
+            //if (action != null)
+            //{
+            //    ThumbRoot.CornerRadius = ThumbEllipse.CornerRadius = default(CornerRadius);
+            //    ThumbImage.ImageSource = (ImageSource)DefaultPhotoConverter.Convert(action.Photo, true);
+            //}
+
+            return true;
+        }
+
+        private bool SetLoadingTemplate(MessageViewModel message, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -831,12 +761,25 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Collapsed;
 
             TitleLabel.Text = string.Empty;
-            ServiceLabel.Text = message is TLMessageEmpty ? "Deleted message" : string.Empty;
+            ServiceLabel.Text = Strings.Resources.Loading;
             MessageLabel.Text = string.Empty;
             return true;
         }
 
-        private bool SetUnsupportedMediaTemplate(TLMessage message, string title)
+        private bool SetEmptyTemplate(Message message, string title)
+        {
+            Visibility = Visibility.Visible;
+
+            if (ThumbRoot != null)
+                ThumbRoot.Visibility = Visibility.Collapsed;
+
+            TitleLabel.Text = string.Empty;
+            ServiceLabel.Text = message == null ? Strings.Additional.DeletedMessage : string.Empty;
+            MessageLabel.Text = string.Empty;
+            return true;
+        }
+
+        private bool SetUnsupportedMediaTemplate(MessageViewModel message, string title)
         {
             Visibility = Visibility.Visible;
 
@@ -844,13 +787,13 @@ namespace Unigram.Controls.Messages
                 ThumbRoot.Visibility = Visibility.Collapsed;
 
             TitleLabel.Text = GetFromLabel(message, title);
-            ServiceLabel.Text = "Unsupported media";
+            ServiceLabel.Text = Strings.Resources.UnsupportedAttachment;
             MessageLabel.Text = string.Empty;
 
             return true;
         }
 
-        private bool SetUnsupportedTemplate(TLMessageBase message, string title)
+        private bool SetUnsupportedTemplate(MessageViewModel message, string title)
         {
             Visibility = Visibility.Collapsed;
 
@@ -865,82 +808,44 @@ namespace Unigram.Controls.Messages
 
         #endregion
 
-        private string GetFromLabel(TLMessage message, string title)
+        private string GetFromLabel(MessageViewModel message, string title)
         {
             if (!string.IsNullOrWhiteSpace(title))
             {
-                if (title.Equals("forward"))
+                return title;
+            }
+
+            if (message.IsChannelPost)
+            {
+                var chat = message.GetChat();
+                if (chat != null)
                 {
-                    if (message.HasFwdFrom && message.FwdFrom.HasChannelId)
-                    {
-                        if (InMemoryCacheService.Current.GetChat(message.FwdFrom.ChannelId) is TLChannel channel)
-                        {
-                            return channel.Title;
-                        }
-                    }
-                    else if (message.HasFwdFrom && message.FwdFrom.HasFromId)
-                    {
-                        if (InMemoryCacheService.Current.GetUser(message.FwdFrom.FromId) is TLUser user)
-                        {
-                            return user.FullName;
-                        }
-                    }
+                    return message.ProtoService.GetTitle(chat);
                 }
-                else
+            }
+            else if (message.IsSaved())
+            {
+                if (message.ForwardInfo?.Origin is MessageForwardOriginUser fromUser)
                 {
-                    return title;
+                    return message.ProtoService.GetUser(fromUser.SenderUserId)?.GetFullName();
+                }
+                else if (message.ForwardInfo?.Origin is MessageForwardOriginChannel post)
+                {
+                    return message.ProtoService.GetTitle(message.ProtoService.GetChat(post.ChatId));
+                }
+                else if (message.ForwardInfo?.Origin is MessageForwardOriginHiddenUser fromHiddenUser)
+                {
+                    return fromHiddenUser.SenderName;
                 }
             }
 
-            if (message.IsPost && (message.ToId is TLPeerChat || message.ToId is TLPeerChannel))
+            var user = message.GetSenderUser();
+            if (user != null)
             {
-                return message.Parent?.DisplayName ?? string.Empty;
+                return user.GetFullName();
             }
-            else
-            {
-                var from = message.From?.FullName ?? string.Empty;
-                if (message.ViaBot != null && message.FwdFrom == null)
-                {
-                    from += $" via @{message.ViaBot.Username}";
-                }
 
-                return from;
-            }
+            return title ?? string.Empty;
         }
-
-        private string GetFromLabel(TLMessageService message, string title)
-        {
-            if (!string.IsNullOrWhiteSpace(title))
-            {
-                return Title;
-            }
-
-            if (message.IsPost && (message.ToId is TLPeerChat || message.ToId is TLPeerChannel))
-            {
-                return message.Parent?.DisplayName ?? string.Empty;
-            }
-            else
-            {
-                return message.From?.FullName ?? string.Empty;
-            }
-        }
-
-        //#region Cursor
-
-        //// Window.Current.CoreWindow.PointerCursor = new Windows.UI.Core.CoreCursor(Windows.UI.Core.CoreCursorType.Hand, 1);
-
-        //protected override void OnPointerEntered(PointerRoutedEventArgs e)
-        //{
-        //    Window.Current.CoreWindow.PointerCursor = new CoreCursor(CoreCursorType.Hand, 1);
-        //    base.OnPointerEntered(e);
-        //}
-
-        //protected override void OnPointerExited(PointerRoutedEventArgs e)
-        //{
-        //    Window.Current.CoreWindow.PointerCursor = new CoreCursor(CoreCursorType.Arrow, 1);
-        //    base.OnPointerExited(e);
-        //}
-
-        //#endregion
     }
 }

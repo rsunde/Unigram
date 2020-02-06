@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls.Primitives;
 using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Media;
 
 namespace Unigram.Controls
 {
@@ -42,10 +43,69 @@ namespace Unigram.Controls
 
         #endregion
 
+        #region IndeterminateGlyph
+
+        public string IndeterminateGlyph
+        {
+            get { return (string)GetValue(IndeterminateGlyphProperty); }
+            set { SetValue(IndeterminateGlyphProperty, value); }
+        }
+
+        public static readonly DependencyProperty IndeterminateGlyphProperty =
+            DependencyProperty.Register("IndeterminateGlyph", typeof(string), typeof(GlyphToggleButton), new PropertyMetadata(null));
+
+        #endregion
+
+        #region CheckedForeground
+
+        public Brush CheckedForeground
+        {
+            get { return (Brush)GetValue(CheckedForegroundProperty); }
+            set { SetValue(CheckedForegroundProperty, value); }
+        }
+
+        public static readonly DependencyProperty CheckedForegroundProperty =
+            DependencyProperty.Register("CheckedForeground", typeof(Brush), typeof(GlyphToggleButton), new PropertyMetadata(null));
+
+        #endregion
+
+        #region UncheckedForeground
+
+        public Brush UncheckedForeground
+        {
+            get { return (Brush)GetValue(UncheckedForegroundProperty); }
+            set { SetValue(UncheckedForegroundProperty, value); }
+        }
+
+        public static readonly DependencyProperty UncheckedForegroundProperty =
+            DependencyProperty.Register("UncheckedForeground", typeof(Brush), typeof(GlyphToggleButton), new PropertyMetadata(null));
+
+        #endregion
+
+        #region IsOneWay
+
+        public bool IsOneWay
+        {
+            get { return (bool)GetValue(IsOneWayProperty); }
+            set { SetValue(IsOneWayProperty, value); }
+        }
+
+        public static readonly DependencyProperty IsOneWayProperty =
+            DependencyProperty.Register("IsOneWay", typeof(bool), typeof(GlyphToggleButton), new PropertyMetadata(true));
+
+        #endregion
+
         protected override void OnToggle()
         {
-            var binding = GetBindingExpression(IsCheckedProperty);
-            if (binding != null && binding.ParentBinding.Mode == BindingMode.TwoWay)
+            if (IsOneWay)
+            {
+                var binding = GetBindingExpression(IsCheckedProperty);
+                if (binding != null && binding.ParentBinding.Mode == BindingMode.TwoWay)
+                {
+                    base.OnToggle();
+                }
+            }
+            else
             {
                 base.OnToggle();
             }

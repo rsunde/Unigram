@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
 using Unigram.Common;
+using Unigram.Services;
 using Windows.UI.Xaml.Data;
 
 namespace Unigram.Converters
@@ -13,8 +14,7 @@ namespace Unigram.Converters
     {
         public object Convert(object value, Type targetType, object parameter, string language)
         {
-            var user = value as TLUser;
-            if (user != null)
+            if (value is User user)
             {
                 return GetLabel(user, parameter == null);
             }
@@ -27,101 +27,158 @@ namespace Unigram.Converters
             throw new NotImplementedException();
         }
 
-        public static int GetIndex(TLUser user)
+        public static int GetIndex(User user)
         {
-            if (user.IsBot)
+            if (user.Type is UserTypeBot bot)
             {
                 // Last
-                return user.IsBotChatHistory ? 1 : 0;
+                return bot.CanReadAllGroupMessages ? 1 : 0;
             }
 
-            if (user.HasStatus && user.Status != null)
+            switch (user.Status)
             {
-                switch (user.Status)
-                {
-                    case TLUserStatusOffline offline:
-                        return offline.WasOnline;
-                    case TLUserStatusOnline online:
-                        return int.MaxValue;
-                    case TLUserStatusRecently recently:
-                        // recently
-                        // Before within a week
-                        return 5;
-                    case TLUserStatusLastWeek lastWeek:
-                        // within a week
-                        // Before within a month
-                        return 4;
-                    case TLUserStatusLastMonth lastMonth:
-                        // within a month
-                        // Before long time ago
-                        return 3;
-                    case TLUserStatusEmpty empty:
-                    default:
-                        // long time ago
-                        // Before bots
-                        return 2;
-                }
+                case UserStatusOffline offline:
+                    return offline.WasOnline;
+                case UserStatusOnline online:
+                    return int.MaxValue;
+                case UserStatusRecently recently:
+                    // recently
+                    // Before within a week
+                    return 5;
+                case UserStatusLastWeek lastWeek:
+                    // within a week
+                    // Before within a month
+                    return 4;
+                case UserStatusLastMonth lastMonth:
+                    // within a month
+                    // Before long time ago
+                    return 3;
+                case UserStatusEmpty empty:
+                default:
+                    // long time ago
+                    // Before bots
+                    return 2;
             }
-
-            // long time ago
-            // Before bots
-            return 2;
         }
 
-        public static string GetLabel(TLUser user, bool details)
+        public static string GetLabel(User user, bool details)
         {
+            if (user == null)
+            {
+                return null;
+            }
+
             if (user.Id == 777000)
             {
-                return "Service notifications";
+                return Strings.Resources.ServiceNotifications;
             }
-            else if (user.IsBot)
+            else if (IsSupportUser(user))
+            {
+                return Strings.Resources.SupportStatus;
+            }
+            else if (user.Type is UserTypeBot bot)
             {
                 if (details)
                 {
-                    return "Bot";
+                    return Strings.Resources.Bot;
                 }
 
-                return user.IsBotChatHistory ? "Has access to messages" : "Has no access to messages";
+                return bot.CanReadAllGroupMessages ? Strings.Resources.BotStatusRead : Strings.Resources.BotStatusCantRead;
             }
-            else if (user.IsSelf && details)
-            {
-                return "Chat with yourself";
-            }
+            //else if (cacheService.IsUserSavedMessages(user))
+            //{
+            //    return Strings.Resources.ChatYourSelf;
+            //}
+            //else if (user.IsSelf && details)
+            //{
+            //    return Strings.Resources.ChatYourSelf;
+            //}
 
-            if (user.HasStatus && user.Status != null)
+            if (user.Status is UserStatusOffline offline)
             {
-                switch (user.Status)
+                return FormatDateOnline(offline.WasOnline);
+            }
+            else if (user.Status is UserStatusOnline online)
+            {
+                if (online.Expires > DateTime.Now.ToTimestamp() / 1000)
                 {
-                    case TLUserStatusOffline offline:
-                        var now = DateTime.Now;
-                        var seen = TLUtils.ToDateTime(offline.WasOnline);
-                        var time = string.Empty;
-                        if (details)
-                        {
-                            time = ((now.Date == seen.Date) ? "today at " : (((now.Date - seen.Date) == new TimeSpan(1, 0, 0, 0)) ? "yesterday at " : BindConvert.Current.ShortDate.Format(seen) + " ")) + BindConvert.Current.ShortTime.Format(seen);
-                        }
-                        else
-                        {
-                            time = (now.Date == seen.Date) ? ((now - seen).Hours < 1 ? ((now - seen).Minutes < 1 ? "moments ago" : (now - seen).Minutes.ToString() + ((now - seen).Minutes.ToString() == "1" ? " minute ago" : " minutes ago")) : ((now - seen).Hours.ToString()) + (((now - seen).Hours.ToString()) == "1" ? (" hour ago") : (" hours ago"))) : now.Date - seen.Date == new TimeSpan(24, 0, 0) ? "yesterday " + BindConvert.Current.ShortTime.Format(seen) : BindConvert.Current.ShortDate.Format(seen);
-                        }
-
-                        return string.Format("Last seen {0}", time);
-                    case TLUserStatusOnline online:
-                        return "online";
-                    case TLUserStatusRecently recently:
-                        return "Last seen recently";
-                    case TLUserStatusLastWeek lastWeek:
-                        return "Last seen within a week";
-                    case TLUserStatusLastMonth lastMonth:
-                        return "Last seen within a month";
-                    case TLUserStatusEmpty empty:
-                    default:
-                        return "Last seen a long time ago";
+                    return Strings.Resources.Online;
+                }
+                else
+                {
+                    return FormatDateOnline(online.Expires);
                 }
             }
+            else if (user.Status is UserStatusRecently recently)
+            {
+                return Strings.Resources.Lately;
+            }
+            else if (user.Status is UserStatusLastWeek lastWeek)
+            {
+                return Strings.Resources.WithinAWeek;
+            }
+            else if (user.Status is UserStatusLastMonth lastMonth)
+            {
+                return Strings.Resources.WithinAMonth;
+            }
+            else
+            {
+                return Strings.Resources.ALongTimeAgo;
+            }
+        }
 
-            // Debugger.Break();
-            return "Last seen a long time ago";
+        private static String FormatDateOnline(long date)
+        {
+            try
+            {
+                var rightNow = DateTime.Now;
+                int day = rightNow.DayOfYear;
+                int year = rightNow.Year;
+
+                var online = Utils.UnixTimestampToDateTime(date);
+                int dateDay = online.DayOfYear;
+                int dateYear = online.Year;
+
+                if (dateDay == day && year == dateYear)
+                {
+                    return string.Format("{0} {1} {2}", Strings.Resources.LastSeen, Strings.Resources.TodayAt, BindConvert.Current.ShortTime.Format(online));
+                }
+                else if (dateDay + 1 == day && year == dateYear)
+                {
+                    return string.Format("{0} {1} {2}", Strings.Resources.LastSeen, Strings.Resources.YesterdayAt, BindConvert.Current.ShortTime.Format(online));
+                }
+                else if (Math.Abs(DateTime.Now.ToTimestamp() / 1000 - date) < 31536000000L)
+                {
+                    string format = string.Format(Strings.Resources.FormatDateAtTime, online.ToString(Strings.Resources.FormatterMonth), BindConvert.Current.ShortTime.Format(online));
+                    return string.Format("{0} {1}", Strings.Resources.LastSeenDate, format);
+                }
+                else
+                {
+                    string format = string.Format(Strings.Resources.FormatDateAtTime, online.ToString(Strings.Resources.FormatterYear), BindConvert.Current.ShortTime.Format(online));
+                    return string.Format("{0} {1}", Strings.Resources.LastSeenDate, format);
+                }
+            }
+            catch (Exception e)
+            {
+                //FileLog.e(e);
+            }
+
+            return "LOC_ERR";
+        }
+
+        public static bool IsSupportUser(User user)
+        {
+            return user != null && (user.IsSupport || user.Id / 1000 == 777 || user.Id == 333000 ||
+                    user.Id == 4240000 || user.Id == 4240000 || user.Id == 4244000 ||
+                    user.Id == 4245000 || user.Id == 4246000 || user.Id == 410000 ||
+                    user.Id == 420000 || user.Id == 431000 || user.Id == 431415000 ||
+                    user.Id == 434000 || user.Id == 4243000 || user.Id == 439000 ||
+                    user.Id == 449000 || user.Id == 450000 || user.Id == 452000 ||
+                    user.Id == 454000 || user.Id == 4254000 || user.Id == 455000 ||
+                    user.Id == 460000 || user.Id == 470000 || user.Id == 479000 ||
+                    user.Id == 796000 || user.Id == 482000 || user.Id == 490000 ||
+                    user.Id == 496000 || user.Id == 497000 || user.Id == 498000 ||
+                    user.Id == 4298000);
         }
     }
 }

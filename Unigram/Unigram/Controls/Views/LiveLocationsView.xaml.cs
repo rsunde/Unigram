@@ -19,14 +19,14 @@ using Windows.UI.Xaml.Navigation;
 
 namespace Unigram.Controls.Views
 {
-    public sealed partial class LiveLocationsView : ContentDialog
+    public sealed partial class LiveLocationsView : TLContentDialog
     {
         public MainViewModel ViewModel => DataContext as MainViewModel;
 
         public LiveLocationsView()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<MainViewModel>();
+            DataContext = TLContainer.Current.Resolve<MainViewModel>();
         }
 
         private void ContentDialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)

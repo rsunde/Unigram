@@ -4,103 +4,95 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
 using Unigram.Collections;
 using Unigram.Common;
 using Unigram.Controls;
+using Unigram.Services;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
+using Telegram.Td.Api;
 
 namespace Unigram.ViewModels.Settings
 {
-    public class SettingsSessionsViewModel : UnigramViewModelBase, IHandle<TLUpdateServiceNotification>, IHandle
+    public class SettingsSessionsViewModel : TLViewModelBase
     {
-        private Dictionary<long, TLAuthorization> _cachedItems;
-
-        public SettingsSessionsViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator) 
-            : base(protoService, cacheService, aggregator)
+        public SettingsSessionsViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator) 
+            : base(protoService, cacheService, settingsService, aggregator)
         {
-            _cachedItems = new Dictionary<long, TLAuthorization>();
-            Items = new SortedObservableCollection<TLAuthorization>(new TLAuthorizationComparer());
+            Items = new MvxObservableCollection<KeyedList<SessionsGroup, Session>>();
 
-            TerminateCommand = new RelayCommand<TLAuthorization>(TerminateExecute);
+            TerminateCommand = new RelayCommand<Session>(TerminateExecute);
             TerminateOthersCommand = new RelayCommand(TerminateOtherExecute);
         }
 
         public override async Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
             await UpdateSessionsAsync();
-            Aggregator.Subscribe(this);
         }
 
-        public override Task OnNavigatedFromAsync(IDictionary<string, object> pageState, bool suspending)
-        {
-            Aggregator.Unsubscribe(this);
-            return Task.CompletedTask;
-        }
-
-        public void Handle(TLUpdateServiceNotification update)
-        {
-            BeginOnUIThread(async () =>
-            {
-                await UpdateSessionsAsync();
-            });
-        }
+        //public void Handle(TLUpdateServiceNotification update)
+        //{
+        //    BeginOnUIThread(async () =>
+        //    {
+        //        await UpdateSessionsAsync();
+        //    });
+        //}
 
         private async Task UpdateSessionsAsync()
         {
-            var response = await ProtoService.GetAuthorizationsAsync();
-            if (response.IsSucceeded)
+            ProtoService.Send(new GetActiveSessions(), result =>
             {
-                foreach (var item in response.Result.Authorizations)
+                if (result is Sessions sessions)
                 {
-                    if (_cachedItems.ContainsKey(item.Hash))
+                    BeginOnUIThread(() =>
                     {
-                        if (item.IsCurrent)
-                        {
-                            var cached = _cachedItems[item.Hash];
-                            cached.Update(item);
-                            cached.RaisePropertyChanged(() => cached.AppName);
-                            cached.RaisePropertyChanged(() => cached.AppVersion);
-                            cached.RaisePropertyChanged(() => cached.DeviceModel);
-                            cached.RaisePropertyChanged(() => cached.Platform);
-                            cached.RaisePropertyChanged(() => cached.SystemVersion);
-                            cached.RaisePropertyChanged(() => cached.Ip);
-                            cached.RaisePropertyChanged(() => cached.Country);
-                            cached.RaisePropertyChanged(() => cached.DateActive);
-                        }
-                        else
-                        {
-                            Items.Remove(_cachedItems[item.Hash]);
-                            Items.Add(item);
+                        var results = new List<Session>();
+                        var pending = new List<Session>();
 
-                            _cachedItems[item.Hash] = item;
-                        }
-                    }
-                    else
-                    {
-                        _cachedItems[item.Hash] = item;
-                        if (item.IsCurrent)
+                        foreach (var item in sessions.SessionsValue)
                         {
-                            Current = item;
+                            if (item.IsCurrent)
+                            {
+                                Current = item;
+                            }
+                            else if (item.IsPasswordPending)
+                            {
+                                pending.Add(item);
+                            }
+                            else
+                            {
+                                results.Add(item);
+                            }
+                        }
+
+                        if (pending.Count > 0)
+                        {
+                            Items.ReplaceWith(new[]
+                            {
+                                new KeyedList<SessionsGroup, Session>(new SessionsGroup { Title = Strings.Resources.LoginAttempts }, pending.OrderByDescending(x => x.LastActiveDate)),
+                                new KeyedList<SessionsGroup, Session>(new SessionsGroup { Title = Strings.Resources.OtherSessions, Footer = Strings.Resources.LoginAttemptsInfo }, results.OrderByDescending(x => x.LastActiveDate))
+                            });
+                        }
+                        else if (results.Count > 0)
+                        {
+                            Items.ReplaceWith(new[]
+                            {
+                                new KeyedList<SessionsGroup, Session>(new SessionsGroup { Title = Strings.Resources.OtherSessions }, results.OrderByDescending(x => x.LastActiveDate))
+                            });
                         }
                         else
                         {
-                            Items.Add(item);
+                            Items.Clear();
                         }
-                    }
+                    });
                 }
-            }
+            });
         }
 
-        public ObservableCollection<TLAuthorization> Items { get; private set; }
+        public MvxObservableCollection<KeyedList<SessionsGroup, Session>> Items { get; private set; }
 
-        private TLAuthorization _current;
-        public TLAuthorization Current
+        private Session _current;
+        public Session Current
         {
             get
             {
@@ -112,20 +104,23 @@ namespace Unigram.ViewModels.Settings
             }
         }
 
-        public RelayCommand<TLAuthorization> TerminateCommand { get; }
-        private async void TerminateExecute(TLAuthorization session)
+        public RelayCommand<Session> TerminateCommand { get; }
+        private async void TerminateExecute(Session session)
         {
-            var terminate = await TLMessageDialog.ShowAsync("Terminate this session?", "Telegram", "Yes", "No");
+            var terminate = await TLMessageDialog.ShowAsync(Strings.Resources.TerminateSessionQuestion, Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
             if (terminate == ContentDialogResult.Primary)
             {
-                var response = await ProtoService.ResetAuthorizationAsync(session.Hash);
-                if (response.IsSucceeded)
+                var response = await ProtoService.SendAsync(new TerminateSession(session.Id));
+                if (response is Ok)
                 {
-                    Items.Remove(session);
+                    foreach (var group in Items)
+                    {
+                        group.Remove(session);
+                    }
                 }
-                else
+                else if (response is Error error)
                 {
-                    Execute.ShowDebugMessage("auth.resetAuthotization error " + response.Error);
+                    Logs.Logger.Error(Logs.Target.API, "auth.resetAuthotization error " + error);
                 }
             }
         }
@@ -133,39 +128,25 @@ namespace Unigram.ViewModels.Settings
         public RelayCommand TerminateOthersCommand { get; }
         private async void TerminateOtherExecute()
         {
-            var terminate = await TLMessageDialog.ShowAsync("Are you sure you want to terminate all other sessions?", "Telegram", "Yes", "No");
+            var terminate = await TLMessageDialog.ShowAsync(Strings.Resources.AreYouSureSessions, Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
             if (terminate == ContentDialogResult.Primary)
             {
-                var response = await ProtoService.ResetAuthorizationsAsync();
-                if (response.IsSucceeded)
+                var response = await ProtoService.SendAsync(new TerminateAllOtherSessions());
+                if (response is Ok)
                 {
                     Items.Clear();
                 }
-                else
+                else if (response is Error error)
                 {
-                    Execute.ShowDebugMessage("auth.resetAuthotization error " + response.Error);
+                    Logs.Logger.Error(Logs.Target.API, "auth.resetAuthotizations error " + error);
                 }
             }
         }
     }
 
-    public class TLAuthorizationComparer : IComparer<TLAuthorization>
+    public class SessionsGroup
     {
-        public int Compare(TLAuthorization x, TLAuthorization y)
-        {
-            var epoch = y.DateActive.CompareTo(x.DateActive);
-            if (epoch == 0)
-            {
-                var appName = x.AppName.CompareTo(y.AppName);
-                if (appName == 0)
-                {
-                    return x.Hash.CompareTo(y.Hash);
-                }
-
-                return appName;
-            }
-
-            return epoch;
-        }
+        public string Title { get; set; }
+        public string Footer { get; set; }
     }
 }

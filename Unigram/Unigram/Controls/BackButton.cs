@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using LinqToVisualTree;
-using Windows.UI.Xaml.Controls;
+using Template10.Common;
 
 namespace Unigram.Controls
 {
@@ -13,12 +12,12 @@ namespace Unigram.Controls
         public BackButton()
         {
             DefaultStyleKey = typeof(BackButton);
+            Click += OnClick;
         }
 
-        protected override void OnApplyTemplate()
+        private void OnClick(object sender, Windows.UI.Xaml.RoutedEventArgs e)
         {
-            var page = this.Ancestors<Page>().FirstOrDefault() as Page;
-            base.OnApplyTemplate();
+            BootStrapper.Current.RaiseBackRequested();
         }
     }
 }

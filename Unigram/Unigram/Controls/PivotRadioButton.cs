@@ -12,7 +12,7 @@ namespace Unigram.Controls
     {
         public PivotRadioButton()
         {
-            DefaultStyleKey = typeof(PivotRadioButton);
+            DefaultStyleKey = typeof(RadioButton);
             Click += OnClick;
         }
 
@@ -56,6 +56,10 @@ namespace Unigram.Controls
             if (Index == SelectedValue)
             {
                 IsChecked = true;
+            }
+            else
+            {
+                ClearValue(IsCheckedProperty);
             }
         }
     }

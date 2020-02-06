@@ -3,32 +3,30 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Payments;
 using Unigram.Common;
-using Unigram.Core.Models;
-using Unigram.Core.Stripe;
+using Unigram.Entities;
+using Unigram.Services.Stripe;
 using Unigram.Views.Payments;
 using Windows.Data.Json;
 using Windows.UI.Xaml.Navigation;
+using Unigram.Services;
+using Telegram.Td.Api;
 
 namespace Unigram.ViewModels.Payments
 {
     public class PaymentFormStep3ViewModel : PaymentFormViewModelBase
     {
-        private TLPaymentRequestedInfo _info;
-        private TLPaymentsValidatedRequestedInfo _requestedInfo;
-        private TLShippingOption _shipping;
+        private OrderInfo _info;
+        private ValidatedOrderInfo _requestedInfo;
+        private ShippingOption _shipping;
 
         private string _publishableKey;
 
-        public PaymentFormStep3ViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator) 
-            : base(protoService, cacheService, aggregator)
+        public PaymentFormStep3ViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             SendCommand = new RelayCommand(SendExecute, () => !IsLoading);
         }
@@ -36,49 +34,51 @@ namespace Unigram.ViewModels.Payments
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
             var buffer = parameter as byte[];
-            if (buffer != null)
+            if (buffer == null)
             {
-                using (var from = new TLBinaryReader(buffer))
-                {
-                    var tuple = new TLTuple<TLMessage, TLPaymentsPaymentForm, TLPaymentRequestedInfo, TLPaymentsValidatedRequestedInfo, TLShippingOption>(from);
-
-                    Message = tuple.Item1;
-                    Invoice = tuple.Item1.Media as TLMessageMediaInvoice;
-                    PaymentForm = tuple.Item2;
-
-                    _info = tuple.Item3;
-                    _requestedInfo = tuple.Item4;
-                    _shipping = tuple.Item5;
-
-                    if (_paymentForm.HasNativeProvider && _paymentForm.HasNativeParams && _paymentForm.NativeProvider.Equals("stripe"))
-                    {
-                        IsNativeUsed = true;
-                        SelectedCountry = null;
-
-                        var json = JsonObject.Parse(_paymentForm.NativeParams.Data);
-
-                        NeedCountry = json.GetNamedBoolean("need_country", false);
-                        NeedZip = json.GetNamedBoolean("need_zip", false);
-                        NeedCardholderName = json.GetNamedBoolean("need_cardholder_name", false);
-
-                        _publishableKey = json.GetNamedString("publishable_key", string.Empty);
-                    }
-                    else
-                    {
-                        IsNativeUsed = false;
-                        RaisePropertyChanged("Navigate");
-                    }
-
-                    //var info = PaymentForm.HasSavedInfo ? PaymentForm.SavedInfo : new TLPaymentRequestedInfo();
-                    //if (info.ShippingAddress == null)
-                    //{
-                    //    info.ShippingAddress = new TLPostAddress();
-                    //}
-
-                    //Info = info;
-                    //SelectedCountry = null;
-                }
+                return Task.CompletedTask;
             }
+
+            //using (var from = TLObjectSerializer.CreateReader(buffer.AsBuffer()))
+            //{
+            //    var tuple = new TLTuple<TLMessage, TLPaymentsPaymentForm, TLPaymentRequestedInfo, TLPaymentsValidatedRequestedInfo, TLShippingOption>(from);
+
+            //    Message = tuple.Item1;
+            //    Invoice = tuple.Item1.Media as TLMessageMediaInvoice;
+            //    PaymentForm = tuple.Item2;
+
+            //    _info = tuple.Item3;
+            //    _requestedInfo = tuple.Item4;
+            //    _shipping = tuple.Item5;
+
+            //    if (_paymentForm.HasNativeProvider && _paymentForm.HasNativeParams && _paymentForm.NativeProvider.Equals("stripe"))
+            //    {
+            //        IsNativeUsed = true;
+            //        SelectedCountry = null;
+
+            //        var json = JsonObject.Parse(_paymentForm.NativeParams.Data);
+
+            //        NeedCountry = json.GetNamedBoolean("need_country", false);
+            //        NeedZip = json.GetNamedBoolean("need_zip", false);
+            //        NeedCardholderName = json.GetNamedBoolean("need_cardholder_name", false);
+
+            //        _publishableKey = json.GetNamedString("publishable_key", string.Empty);
+            //    }
+            //    else
+            //    {
+            //        IsNativeUsed = false;
+            //        RaisePropertyChanged("Navigate");
+            //    }
+
+            //    //var info = PaymentForm.HasSavedInfo ? PaymentForm.SavedInfo : new TLPaymentRequestedInfo();
+            //    //if (info.ShippingAddress == null)
+            //    //{
+            //    //    info.ShippingAddress = new TLPostAddress();
+            //    //}
+
+            //    //Info = info;
+            //    //SelectedCountry = null;
+            //}
 
             return Task.CompletedTask;
         }
@@ -177,7 +177,7 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        public List<KeyedList<string, Country>> Countries { get; } = Country.GroupedCountries;
+        public IList<Country> Countries { get; } = Country.Countries.OrderBy(x => x.DisplayName).ToList();
 
         private Country _selectedCountry = Country.Countries[0];
         public Country SelectedCountry
@@ -211,13 +211,12 @@ namespace Unigram.ViewModels.Payments
         private async void SendExecute()
         {
             var save = _isSave ?? false;
-            if (_paymentForm.HasSavedCredentials && !save && _paymentForm.IsCanSaveCredentials)
+            if (_paymentForm.SavedCredentials != null && !save && _paymentForm.CanSaveCredentials)
             {
-                _paymentForm.HasSavedCredentials = false;
+                //_paymentForm.HasSavedCredentials = false;
                 _paymentForm.SavedCredentials = null;
 
-                ApplicationSettings.Current.TmpPassword = null;
-                ProtoService.ClearSavedInfoAsync(false, true, null, null);
+                ProtoService.Send(new DeleteSavedCredentials());
             }
 
             var month = 0;
@@ -359,7 +358,7 @@ namespace Unigram.ViewModels.Payments
 
         public void NavigateToNextStep(string title, string credentials, bool save)
         {
-            NavigationService.NavigateToPaymentFormStep5(_message, _paymentForm, _info, _requestedInfo, _shipping, title, credentials, save);
+            //NavigationService.NavigateToPaymentFormStep5(_message, _paymentForm, _info, _requestedInfo, _shipping, title, credentials, save);
         }
     }
 }

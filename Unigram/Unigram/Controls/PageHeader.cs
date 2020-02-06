@@ -4,18 +4,70 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using Template10.Common;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Markup;
 
 namespace Unigram.Controls
 {
+    [TemplatePart(Name = "BackButton", Type = typeof(Button))]
     public class PageHeader : Control
     {
         public PageHeader()
         {
             DefaultStyleKey = typeof(PageHeader);
         }
+
+        protected override void OnApplyTemplate()
+        {
+            var button = GetTemplateChild("BackButton") as Button;
+            if (button != null)
+            {
+                button.Click += Back_Click;
+            }
+
+            base.OnApplyTemplate();
+        }
+
+        private void Back_Click(object sender, RoutedEventArgs e)
+        {
+            var command = BackCommand;
+            if (command != null)
+            {
+                command.Execute(null);
+            }
+            else
+            {
+                BootStrapper.Current.RaiseBackRequested();
+            }
+        }
+
+        #region BackCommand
+
+        public ICommand BackCommand
+        {
+            get { return (ICommand)GetValue(BackCommandProperty); }
+            set { SetValue(BackCommandProperty, value); }
+        }
+
+        public static readonly DependencyProperty BackCommandProperty =
+            DependencyProperty.Register("BackCommand", typeof(ICommand), typeof(PageHeader), new PropertyMetadata(null));
+
+        #endregion
+
+        #region BackVisibility
+
+        public Visibility BackVisibility
+        {
+            get { return (Visibility)GetValue(BackVisibilityProperty); }
+            set { SetValue(BackVisibilityProperty, value); }
+        }
+
+        public static readonly DependencyProperty BackVisibilityProperty =
+            DependencyProperty.Register("BackVisibility", typeof(Visibility), typeof(PageHeader), new PropertyMetadata(Visibility.Visible));
+
+        #endregion
 
         #region Text
 
@@ -102,14 +154,78 @@ namespace Unigram.Controls
             DependencyProperty.Register("CommandVisibility", typeof(Visibility), typeof(ButtonPageHeader), new PropertyMetadata(Visibility.Visible));
 
         #endregion
+
+        #region CommandToolTip
+
+        public string CommandToolTip
+        {
+            get { return (string)GetValue(CommandToolTipProperty); }
+            set { SetValue(CommandToolTipProperty, value); }
+        }
+
+        public static readonly DependencyProperty CommandToolTipProperty =
+            DependencyProperty.Register("CommandToolTip", typeof(string), typeof(ButtonPageHeader), new PropertyMetadata(null));
+
+        #endregion
     }
 
+    [TemplatePart(Name = "BackButton", Type = typeof(Button))]
     public class ContentPageHeader : ContentControl
     {
         public ContentPageHeader()
         {
             DefaultStyleKey = typeof(ContentPageHeader);
         }
+
+        protected override void OnApplyTemplate()
+        {
+            var button = GetTemplateChild("BackButton") as Button;
+            if (button != null)
+            {
+                button.Click += Back_Click;
+            }
+
+            base.OnApplyTemplate();
+        }
+
+        private void Back_Click(object sender, RoutedEventArgs e)
+        {
+            var command = BackCommand;
+            if (command != null)
+            {
+                command.Execute(null);
+            }
+            else
+            {
+                BootStrapper.Current.RaiseBackRequested();
+            }
+        }
+
+        #region BackCommand
+
+        public ICommand BackCommand
+        {
+            get { return (ICommand)GetValue(BackCommandProperty); }
+            set { SetValue(BackCommandProperty, value); }
+        }
+
+        public static readonly DependencyProperty BackCommandProperty =
+            DependencyProperty.Register("BackCommand", typeof(ICommand), typeof(ContentPageHeader), new PropertyMetadata(null));
+
+        #endregion
+
+        #region BackVisibility
+
+        public Visibility BackVisibility
+        {
+            get { return (Visibility)GetValue(BackVisibilityProperty); }
+            set { SetValue(BackVisibilityProperty, value); }
+        }
+
+        public static readonly DependencyProperty BackVisibilityProperty =
+            DependencyProperty.Register("BackVisibility", typeof(Visibility), typeof(ContentPageHeader), new PropertyMetadata(Visibility.Visible));
+
+        #endregion
 
         #region IsLoading
 

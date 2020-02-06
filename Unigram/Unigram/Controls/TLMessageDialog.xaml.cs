@@ -1,14 +1,17 @@
-﻿using System;
+﻿using LinqToVisualTree;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
+using Telegram.Td.Api;
 using Unigram.Common;
-using Unigram.Core.Helpers;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.Foundation.Metadata;
+using Windows.UI;
+using Windows.UI.Input;
 using Windows.UI.ViewManagement;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -17,12 +20,11 @@ using Windows.UI.Xaml.Data;
 using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
-
-// The Content Dialog item template is documented at http://go.microsoft.com/fwlink/?LinkId=234238
+using Windows.UI.Xaml.Shapes;
 
 namespace Unigram.Controls
 {
-    public sealed partial class TLMessageDialog : ContentDialog
+    public sealed partial class TLMessageDialog : TLContentDialog
     {
         public TLMessageDialog()
         {
@@ -60,7 +62,7 @@ namespace Unigram.Controls
         private void MaskTitleAndStatusBar()
         {
             var titlebar = ApplicationView.GetForCurrentView().TitleBar;
-            var backgroundBrush = Application.Current.Resources["TelegramBackgroundTitlebarBrush"] as SolidColorBrush;
+            var backgroundBrush = Application.Current.Resources["PageHeaderBackgroundBrush"] as SolidColorBrush;
             var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
             var overlayBrush = Application.Current.Resources["SystemControlBackgroundAltMediumBrush"] as SolidColorBrush;
 
@@ -71,35 +73,14 @@ namespace Unigram.Controls
 
                 titlebar.BackgroundColor = maskBackground;
                 titlebar.ForegroundColor = maskForeground;
-                titlebar.ButtonBackgroundColor = maskBackground;
+                //titlebar.ButtonBackgroundColor = maskBackground;
                 titlebar.ButtonForegroundColor = maskForeground;
-
-                if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.StatusBar"))
-                {
-                    var statusBar = StatusBar.GetForCurrentView();
-                    statusBar.BackgroundColor = maskBackground;
-                    statusBar.ForegroundColor = maskForeground;
-                }
             }
         }
 
         private void UnmaskTitleAndStatusBar()
         {
-            var titlebar = ApplicationView.GetForCurrentView().TitleBar;
-            var backgroundBrush = Application.Current.Resources["TelegramBackgroundTitlebarBrush"] as SolidColorBrush;
-            var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
-
-            titlebar.BackgroundColor = backgroundBrush.Color;
-            titlebar.ForegroundColor = foregroundBrush.Color;
-            titlebar.ButtonBackgroundColor = backgroundBrush.Color;
-            titlebar.ButtonForegroundColor = foregroundBrush.Color;
-
-            if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.StatusBar"))
-            {
-                var statusBar = StatusBar.GetForCurrentView();
-                statusBar.BackgroundColor = backgroundBrush.Color;
-                statusBar.ForegroundColor = foregroundBrush.Color;
-            }
+            TLWindowContext.GetForCurrentView().UpdateTitleBar();
         }
 
         public string Message
@@ -111,6 +92,18 @@ namespace Unigram.Controls
             set
             {
                 TextBlockHelper.SetMarkdown(MessageLabel, value);
+            }
+        }
+
+        public FormattedText FormattedMessage
+        {
+            get
+            {
+                return TextBlockHelper.GetFormattedText(MessageLabel);
+            }
+            set
+            {
+                TextBlockHelper.SetFormattedText(MessageLabel, value);
             }
         }
 
@@ -144,6 +137,17 @@ namespace Unigram.Controls
             var dialog = new TLMessageDialog();
             dialog.Title = title;
             dialog.Message = message;
+            dialog.PrimaryButtonText = primary ?? string.Empty;
+            dialog.SecondaryButtonText = secondary ?? string.Empty;
+
+            return dialog.ShowQueuedAsync();
+        }
+
+        public static Task<ContentDialogResult> ShowAsync(FormattedText message, string title = null, string primary = null, string secondary = null)
+        {
+            var dialog = new TLMessageDialog();
+            dialog.Title = title;
+            dialog.FormattedMessage = message;
             dialog.PrimaryButtonText = primary ?? string.Empty;
             dialog.SecondaryButtonText = secondary ?? string.Empty;
 

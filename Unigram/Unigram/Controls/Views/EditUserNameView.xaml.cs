@@ -15,15 +15,32 @@ using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 
-// The Content Dialog item template is documented at https://go.microsoft.com/fwlink/?LinkId=234238
-
 namespace Unigram.Controls.Views
 {
-    public sealed partial class EditUserNameView : ContentDialog
+    public sealed partial class EditUserNameView : TLContentDialog
     {
-        private EditUserNameView()
+        public EditUserNameView()
         {
             InitializeComponent();
+
+            Title = Strings.Resources.EditName;
+            PrimaryButtonText = Strings.Resources.OK;
+            SecondaryButtonText = Strings.Resources.Cancel;
+        }
+
+        public EditUserNameView(string firstName, string lastName, bool showShare = false)
+        {
+            InitializeComponent();
+
+            FirstName = firstName;
+            LastName = lastName;
+
+            SharePhoneCheck.Content = string.Format(Strings.Resources.SharePhoneNumberWith, firstName);
+            SharePhoneCheck.Visibility = showShare ? Visibility.Visible : Visibility.Collapsed;
+
+            Title = Strings.Resources.EditName;
+            PrimaryButtonText = Strings.Resources.OK;
+            SecondaryButtonText = Strings.Resources.Cancel;
         }
 
         public string FirstName
@@ -32,10 +49,10 @@ namespace Unigram.Controls.Views
             {
                 if (string.IsNullOrWhiteSpace(TextFirstName.Text))
                 {
-                    return TextLastName.Text;
+                    return TextLastName.Text ?? string.Empty;
                 }
 
-                return TextFirstName.Text;
+                return TextFirstName.Text ?? string.Empty;
             }
             private set
             {
@@ -49,10 +66,10 @@ namespace Unigram.Controls.Views
             {
                 if (string.IsNullOrWhiteSpace(TextFirstName.Text))
                 {
-                    return null;
+                    return string.Empty;
                 }
 
-                return TextLastName.Text;
+                return TextLastName.Text ?? string.Empty;
             }
             private set
             {
@@ -60,22 +77,19 @@ namespace Unigram.Controls.Views
             }
         }
 
-        private static EditUserNameView _current;
-        public static EditUserNameView Current
+        public bool SharePhoneNumber
         {
-            get
-            {
-                if (_current == null)
-                    _current = new EditUserNameView();
-
-                return _current;
-            }
+            get => SharePhoneCheck.IsChecked == true;
+            set => SharePhoneCheck.IsChecked = value;
         }
 
-        public Task<ContentDialogResult> ShowAsync(string firstName, string lastName)
+        public Task<ContentDialogResult> ShowAsync(string firstName, string lastName, bool showShare = false)
         {
             FirstName = firstName;
             LastName = lastName;
+
+            SharePhoneCheck.Content = string.Format(Strings.Resources.SharePhoneNumberWith, firstName);
+            SharePhoneCheck.Visibility = showShare ? Visibility.Visible : Visibility.Collapsed;
 
             return this.ShowQueuedAsync();
         }

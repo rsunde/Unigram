@@ -4,20 +4,25 @@ using System.IO;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.TL;
+using Telegram.Td.Api;
+using Unigram.Collections;
+using Unigram.Common;
+using Unigram.Converters;
 using Unigram.ViewModels;
 using Unigram.ViewModels.Settings;
+using Unigram.ViewModels.Supergroups;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
+using Windows.Foundation.Metadata;
+using Windows.UI;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Controls.Primitives;
 using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Documents;
 using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
-
-// The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
 namespace Unigram.Controls.Views
 {
@@ -27,24 +32,23 @@ namespace Unigram.Controls.Views
 
         public UsersSelectionView()
         {
-            if (Windows.ApplicationModel.DesignMode.DesignModeEnabled)
-            {
-                DataContext = new SettingsBlockUserViewModel(null, null, null);
-            }
-
             InitializeComponent();
 
             var observable = Observable.FromEventPattern<TextChangedEventArgs>(SearchField, "TextChanged");
-            var throttled = observable.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(x =>
+            var throttled = observable.Throttle(TimeSpan.FromMilliseconds(Constants.TypingTimeout)).ObserveOnDispatcher().Subscribe(async x =>
             {
-                if (string.IsNullOrWhiteSpace(SearchField.Text))
+                var items = ViewModel.Search;
+                if (items != null && string.Equals(SearchField.Text, items.Query))
                 {
-                    ViewModel.Search.Clear();
-                    return;
+                    await items.LoadMoreItemsAsync(1);
+                    await items.LoadMoreItemsAsync(2);
                 }
-
-                ViewModel.SearchAsync(SearchField.Text);
             });
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            SearchField.FocusInput(FocusState.Keyboard);
         }
 
         public void Attach()
@@ -64,7 +68,7 @@ namespace Unigram.Controls.Views
                 List.SelectionChanged -= ListView_SelectionChanged;
                 foreach (var item in e.NewItems)
                 {
-                    var listItem = List.Items?.SingleOrDefault(li => li is TLUser user && (item as TLUser).Id == user.Id);
+                    var listItem = List.Items?.SingleOrDefault(li => li is User user && (item as User).Id == user.Id);
                     if (listItem != null)
                     {
                         List.SelectedItems.Add(item);
@@ -77,7 +81,7 @@ namespace Unigram.Controls.Views
                 List.SelectionChanged -= ListView_SelectionChanged;
                 foreach (var item in e.OldItems)
                 {
-                    var listItem = List.Items?.SingleOrDefault(li => li is TLUser user && (item as TLUser).Id == user.Id);
+                    var listItem = List.Items?.SingleOrDefault(li => li is User user && (item as User).Id == user.Id);
                     if (listItem != null)
                     {
                         List.SelectedItems.Remove(item);
@@ -98,7 +102,7 @@ namespace Unigram.Controls.Views
             {
                 foreach (var item in e.AddedItems)
                 {
-                    if (item is TLUser user && ViewModel.SelectedItems.All(selectedUser => selectedUser.Id != user.Id))
+                    if (item is User user && ViewModel.SelectedItems.All(selectedUser => selectedUser.Id != user.Id))
                     {
                         ViewModel.SelectedItems.Add(user);
                     }
@@ -109,7 +113,7 @@ namespace Unigram.Controls.Views
             {
                 foreach (var item in e.RemovedItems)
                 {
-                    if (item is TLUser user && ViewModel.SelectedItems.Any(selectedUser => selectedUser.Id == user.Id))
+                    if (item is User user && ViewModel.SelectedItems.Any(selectedUser => selectedUser.Id == user.Id))
                     {
                         ViewModel.SelectedItems.Remove(user);
                     }
@@ -128,9 +132,20 @@ namespace Unigram.Controls.Views
             {
                 foreach (var item in e.AddedItems)
                 {
-                    if (item is TLUser user)
+                    if (item is User user)
                     {
                         ViewModel.SelectedItems.Add(user);
+                    }
+                    else if (item is SearchResult result)
+                    {
+                        if (result.User != null)
+                        {
+                            ViewModel.SelectedItems.Add(result.User);
+                        }
+                        else if (result.Chat != null)
+                        {
+                            ViewModel.SelectedItems.Add(ViewModel.ProtoService.GetUser(result.Chat));
+                        }
                     }
                 }
             }
@@ -140,15 +155,39 @@ namespace Unigram.Controls.Views
         {
             if (ViewModel.SelectionMode == ListViewSelectionMode.None)
             {
-                ViewModel.SelectedItems.Clear();
-                ViewModel.SelectedItems.Add(e.ClickedItem as TLUser);
-                ViewModel.SendCommand.Execute();
+                if (e.ClickedItem is SearchResult result)
+                {
+                    if (result.User != null)
+                    {
+                        ViewModel.SingleCommand.Execute(result.User);
+                    }
+                    else if (result.Chat != null)
+                    {
+                        ViewModel.SingleCommand.Execute(ViewModel.ProtoService.GetUser(result.Chat));
+                    }
+                }
+                else
+                {
+                    ViewModel.SingleCommand.Execute(e.ClickedItem as User);
+                }
             }
         }
 
-        private void SearchField_TextChanged(object sender, TextChangedEventArgs e)
+        private async void SearchField_TextChanged(object sender, TextChangedEventArgs e)
         {
-            SearchList.Visibility = string.IsNullOrEmpty(SearchField.Text) ? Visibility.Collapsed : Visibility.Visible;
+            if (string.IsNullOrEmpty(SearchField.Text))
+            {
+                ContentPanel.Visibility = Visibility.Visible;
+
+                ViewModel.Search = null;
+            }
+            else
+            {
+                ContentPanel.Visibility = Visibility.Collapsed;
+
+                var items = ViewModel.Search = new SearchUsersCollection(ViewModel.ProtoService, SearchField.Text);
+                await items.LoadMoreItemsAsync(0);
+            }
         }
 
         private void TagsTextBox_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -163,10 +202,124 @@ namespace Unigram.Controls.Views
             return (maximum == int.MaxValue && infinite) || maximum == 1 ? Visibility.Collapsed : Visibility.Visible;
         }
 
+        private Visibility ConvertConfirm(int maximum, bool visible)
+        {
+            return maximum > 1 && visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         #endregion
+
+        public bool IsConfirmVisible { get; set; } = true;
 
         public object Header { get; set; }
 
         public DataTemplate HeaderTemplate { get; set; }
+
+        private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as Grid;
+            var user = args.Item as User;
+
+            if (args.Phase == 0)
+            {
+                var title = content.Children[1] as TextBlock;
+                title.Text = user.GetFullName();
+            }
+            else if (args.Phase == 1)
+            {
+                var subtitle = content.Children[2] as TextBlock;
+                subtitle.Text = LastSeenConverter.GetLabel(user, false);
+            }
+            else if (args.Phase == 2)
+            {
+                var photo = content.Children[0] as ProfilePicture;
+                photo.Source = PlaceholderHelper.GetUser(ViewModel.ProtoService, user, 36);
+            }
+
+            if (args.Phase < 2)
+            {
+                args.RegisterUpdateCallback(OnContainerContentChanging);
+            }
+
+            args.Handled = true;
+        }
+
+        private void Search_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                //var photo = content.Children[0] as ProfilePicture;
+                //photo.Source = null;
+
+                return;
+            }
+
+            var result = args.Item as SearchResult;
+            var chat = result.Chat;
+            var user = result.User ?? ViewModel.ProtoService.GetUser(chat);
+
+            if (user == null)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as Grid;
+            if (content == null)
+            {
+                return;
+            }
+
+            if (args.Phase == 0)
+            {
+                var title = content.Children[1] as TextBlock;
+                title.Text = user.GetFullName();
+            }
+            else if (args.Phase == 1)
+            {
+                var subtitle = content.Children[2] as TextBlock;
+                if (result.IsPublic)
+                {
+                    subtitle.Text = $"@{user.Username}";
+                }
+                else
+                {
+                    subtitle.Text = LastSeenConverter.GetLabel(user, true);
+                }
+
+                if (ApiInformation.IsPropertyPresent("Windows.UI.Xaml.Controls.TextBlock", "TextHighlighters"))
+                {
+                    if (subtitle.Text.StartsWith($"@{result.Query}", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var highligher = new TextHighlighter();
+                        highligher.Foreground = new SolidColorBrush(Colors.Red);
+                        highligher.Background = new SolidColorBrush(Colors.Transparent);
+                        highligher.Ranges.Add(new TextRange { StartIndex = 1, Length = result.Query.Length });
+
+                        subtitle.TextHighlighters.Add(highligher);
+                    }
+                    else
+                    {
+                        subtitle.TextHighlighters.Clear();
+                    }
+                }
+            }
+            else if (args.Phase == 2)
+            {
+                var photo = content.Children[0] as ProfilePicture;
+                photo.Source = PlaceholderHelper.GetUser(ViewModel.ProtoService, user, 36);
+            }
+
+            if (args.Phase < 2)
+            {
+                args.RegisterUpdateCallback(Search_ContainerContentChanging);
+            }
+
+            args.Handled = true;
+        }
     }
 }

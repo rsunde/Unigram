@@ -4,10 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Helpers;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.TL;
 using Unigram.Strings;
 using Windows.Globalization.DateTimeFormatting;
 using Windows.Globalization.NumberFormatting;
@@ -16,6 +12,10 @@ using Windows.UI.Xaml;
 using Windows.UI.Xaml.Media;
 using Windows.System.UserProfile;
 using Windows.Globalization;
+using Unigram.Common;
+using Telegram.Td.Api;
+using Unigram.Native;
+using Unigram.Services;
 
 namespace Unigram.Converters
 {
@@ -38,29 +38,139 @@ namespace Unigram.Converters
         public DateTimeFormatter LongDate { get; private set; }
         public DateTimeFormatter LongTime { get; private set; }
 
-        public List<SolidColorBrush> PlaceholderColors { get; private set; }
+        public DateTimeFormatter MonthFull { get; private set; }
+        public DateTimeFormatter MonthFullYear { get; private set; }
+        public DateTimeFormatter DayMonthFull { get; private set; }
+        public DateTimeFormatter DayMonthFullYear { get; private set; }
 
         private BindConvert()
         {
             //var region = new GeographicRegion();
             //var code = region.CodeTwoLetter;
 
-            ShortDate = new DateTimeFormatter("shortdate", GlobalizationPreferences.Languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
-            ShortTime = new DateTimeFormatter("shorttime", GlobalizationPreferences.Languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
-            LongDate = new DateTimeFormatter("longdate", GlobalizationPreferences.Languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
-            LongTime = new DateTimeFormatter("longtime", GlobalizationPreferences.Languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            var culture = NativeUtils.GetCurrentCulture();
+            var languages = new[] { culture }.Union(GlobalizationPreferences.Languages);
 
-            PlaceholderColors = new List<SolidColorBrush>();
-
-            for (int i = 0; i < 6; i++)
-            {
-                PlaceholderColors.Add((SolidColorBrush)Application.Current.Resources[$"Placeholder{i}Brush"]);
-            }
+            ShortDate = new DateTimeFormatter("shortdate", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            ShortTime = new DateTimeFormatter("shorttime", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            LongDate = new DateTimeFormatter("longdate", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            LongTime = new DateTimeFormatter("longtime", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            MonthFull = new DateTimeFormatter("month.full", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            MonthFullYear = new DateTimeFormatter("month.full year", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            DayMonthFull = new DateTimeFormatter("day month.full", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
+            DayMonthFullYear = new DateTimeFormatter("day month.full year", languages, GlobalizationPreferences.HomeGeographicRegion, GlobalizationPreferences.Calendars.FirstOrDefault(), GlobalizationPreferences.Clocks.FirstOrDefault());
         }
 
-        public SolidColorBrush Bubble(int uid)
+        public static string MonthGrouping(DateTime date)
         {
-            return PlaceholderColors[(uid + SettingsHelper.UserId) % PlaceholderColors.Count];
+            var now = System.DateTime.Now;
+
+            var difference = Math.Abs((date.Month - now.Month) + 12 * (date.Year - now.Year));
+            if (difference >= 12)
+            {
+                return Current.MonthFullYear.Format(date);
+            }
+
+            return Current.MonthFull.Format(date);
+        }
+
+        public static string DayGrouping(DateTime date)
+        {
+            var now = System.DateTime.Now;
+
+            var difference = Math.Abs((date.Month - now.Month) + 12 * (date.Year - now.Year));
+            if (difference >= 12)
+            {
+                return Current.DayMonthFullYear.Format(date);
+            }
+
+            return Current.DayMonthFull.Format(date);
+        }
+
+        public static string Grams(long value, bool gem)
+        {
+            var sign = value < 0 ? "-" : string.Empty;
+            var builder = new StringBuilder(string.Format("{0}{1}.{2:000000000}", sign, Math.Abs(value / 1000000000L), Math.Abs(value % 1000000000)));
+            while (builder.Length > 1 && builder[builder.Length - 1] == '0' && builder[builder.Length - 2] != '.')
+            {
+                builder.Remove(builder.Length - 1, 1);
+            }
+
+            if (gem)
+            {
+                var culture = NativeUtils.GetCurrentCulture();
+                var info = new CultureInfo(culture);
+                if (info.NumberFormat.CurrencyPositivePattern == 0 || info.NumberFormat.CurrencyPositivePattern == 2)
+                {
+                    return string.Format("\uD83D\uDC8E {0}", builder);
+                }
+
+                return string.Format("{0} \uD83D\uDC8E", builder);
+            }
+
+            return builder.ToString();
+        }
+
+        public static string Distance(float distance)
+        {
+            var useImperialSystemType = false;
+
+            switch (SettingsService.Current.DistanceUnits)
+            {
+                case DistanceUnits.Automatic:
+                    var culture = NativeUtils.GetCurrentCulture();
+                    var info = new RegionInfo(culture);
+                    useImperialSystemType = !info.IsMetric;
+                    break;
+                case DistanceUnits.Kilometers:
+                    useImperialSystemType = false;
+                    break;
+                case DistanceUnits.Miles:
+                    useImperialSystemType = true;
+                    break;
+            }
+
+            if (useImperialSystemType)
+            {
+                distance *= 3.28084f;
+                if (distance < 1000)
+                {
+                    return string.Format(Strings.Resources.FootsAway, string.Format("{0}", (int)Math.Max(1, distance)));
+                }
+                else
+                {
+                    String arg;
+                    if (distance % 5280 == 0)
+                    {
+                        arg = string.Format("{0}", (int)(distance / 5280));
+                    }
+                    else
+                    {
+                        arg = string.Format("{0:0.00}", distance / 5280.0f);
+                    }
+                    return string.Format(Strings.Resources.MilesAway, arg);
+                }
+            }
+            else
+            {
+                if (distance < 1000)
+                {
+                    return string.Format(Strings.Resources.MetersAway2, string.Format("{0}", (int)Math.Max(1, distance)));
+                }
+                else
+                {
+                    String arg;
+                    if (distance % 1000 == 0)
+                    {
+                        arg = string.Format("{0}", (int)(distance / 1000));
+                    }
+                    else
+                    {
+                        arg = string.Format("{0:0.00}", distance / 1000.0f);
+                    }
+                    return string.Format(Strings.Resources.KMetersAway2, arg);
+                }
+            }
         }
 
         public string PhoneNumber(string number)
@@ -70,9 +180,41 @@ namespace Unigram.Converters
                 return null;
             }
 
-            return Telegram.Helpers.PhoneNumber.Format(number);
+            return Common.PhoneNumber.Format(number);
         }
 
+        public string BannedUntil(long date)
+        {
+            var banned = Utils.UnixTimestampToDateTime(date);
+            return ShortDate.Format(banned) + ", " + ShortTime.Format(banned);
+
+            //try
+            //{
+            //    date *= 1000;
+            //    var rightNow = System.DateTime.Now;
+            //    var year = rightNow.Year;
+            //    var banned = Utils.UnixTimestampToDateTime(date);
+            //    int dateYear = banned.Year;
+
+            //    if (year == dateYear)
+            //    {
+            //        //formatterBannedUntil = createFormatter(locale, is24HourFormat ? getStringInternal("formatterBannedUntil24H", R.string.formatterBannedUntil24H) : getStringInternal("formatterBannedUntil12H", R.string.formatterBannedUntil12H), is24HourFormat ? "MMM dd yyyy, HH:mm" : "MMM dd yyyy, h:mm a");
+            //        //formatterBannedUntilThisYear = createFormatter(locale, is24HourFormat ? getStringInternal("formatterBannedUntilThisYear24H", R.string.formatterBannedUntilThisYear24H) : getStringInternal("formatterBannedUntilThisYear12H", R.string.formatterBannedUntilThisYear12H), is24HourFormat ? "MMM dd, HH:mm" : "MMM dd, h:mm a");
+
+            //        return getInstance().formatterBannedUntilThisYear.format(new Date(date));
+            //    }
+            //    else
+            //    {
+            //        return getInstance().formatterBannedUntil.format(new Date(date));
+            //    }
+            //}
+            //catch (Exception e)
+            //{
+            //    //FileLog.e(e);
+            //}
+
+            //return "LOC_ERR";
+        }
 
         //private SolidColorBrush BubbleInternal(int? value)
         //{
@@ -101,135 +243,18 @@ namespace Unigram.Converters
         //    }
         //}
 
-        public string FormatTTLString(int ttl)
-        {
-            return CallDuration(ttl);
 
-            // TODO:
-            //if (ttl < 60)
-            //{
-            //    return LocaleController.formatPluralString("Seconds", ttl);
-            //}
-            //else if (ttl < 60 * 60)
-            //{
-            //    return LocaleController.formatPluralString("Minutes", ttl / 60);
-            //}
-            //else if (ttl < 60 * 60 * 24)
-            //{
-            //    return LocaleController.formatPluralString("Hours", ttl / 60 / 60);
-            //}
-            //else if (ttl < 60 * 60 * 24 * 7)
-            //{
-            //    return LocaleController.formatPluralString("Days", ttl / 60 / 60 / 24);
-            //}
-            //else
-            //{
-            //    int days = ttl / 60 / 60 / 24;
-            //    if (ttl % 7 == 0)
-            //    {
-            //        return LocaleController.formatPluralString("Weeks", days / 7);
-            //    }
-            //    else
-            //    {
-            //        return String.format("%s %s", LocaleController.formatPluralString("Weeks", days / 7), LocaleController.formatPluralString("Days", days % 7));
-            //    }
-            //}
-        }
-
-        private Dictionary<string, CurrencyFormatter> _currencyCache = new Dictionary<string, CurrencyFormatter>();
         private Dictionary<string, DateTimeFormatter> _formatterCache = new Dictionary<string, DateTimeFormatter>();
 
         public string FormatAmount(long amount, string currency)
         {
-            if (currency == null)
-            {
-                return string.Empty;
-            }
-
-            bool discount;
-            string customFormat;
-            double doubleAmount;
-
-            currency = currency.ToUpper();
-
-            if (amount < 0)
-            {
-                discount = true;
-            }
-            else
-            {
-                discount = false;
-            }
-
-            amount = Math.Abs(amount);
-
-            switch (currency)
-            {
-                case "CLF":
-                    customFormat = " {0:N4}";
-                    doubleAmount = ((double)amount) / 10000.0d;
-                    break;
-                case "BHD":
-                case "IQD":
-                case "JOD":
-                case "KWD":
-                case "LYD":
-                case "OMR":
-                case "TND":
-                    customFormat = " {0:N3}";
-                    doubleAmount = ((double)amount) / 1000.0d;
-                    break;
-                case "BIF":
-                case "BYR":
-                case "CLP":
-                case "CVE":
-                case "DJF":
-                case "GNF":
-                case "ISK":
-                case "JPY":
-                case "KMF":
-                case "KRW":
-                case "MGA":
-                case "PYG":
-                case "RWF":
-                case "UGX":
-                case "UYI":
-                case "VND":
-                case "VUV":
-                case "XAF":
-                case "XOF":
-                case "XPF":
-                    customFormat = " {0:N0}";
-                    doubleAmount = (double)amount;
-                    break;
-                case "MRO":
-                    customFormat = " {0:N1}";
-                    doubleAmount = ((double)amount) / 10.0d;
-                    break;
-                default:
-                    customFormat = " {0:N2}";
-                    doubleAmount = ((double)amount) / 100.0d;
-                    break;
-            }
-
-            if (_currencyCache.TryGetValue(currency, out CurrencyFormatter formatter) == false)
-            {
-                formatter = new CurrencyFormatter(currency, GlobalizationPreferences.Languages, GlobalizationPreferences.HomeGeographicRegion);
-                _currencyCache[currency] = formatter;
-            }
-
-            if (formatter != null)
-            {
-                return (discount ? "-" : string.Empty) + formatter.Format(doubleAmount);
-            }
-
-            return (discount ? "-" : string.Empty) + string.Format(currency + customFormat, doubleAmount);
+            return Locale.FormatCurrency(amount, currency);
         }
 
-        public string ShippingOption(TLShippingOption option, string currency)
+        public string ShippingOption(ShippingOption option, string currency)
         {
             var amount = 0L;
-            foreach (var price in option.Prices)
+            foreach (var price in option.PriceParts)
             {
                 amount += price.Amount;
             }
@@ -237,115 +262,9 @@ namespace Unigram.Converters
             return $"{FormatAmount(amount, currency)} - {option.Title}";
         }
 
-        public string CallDuration(int seconds)
-        {
-            if (seconds < 60)
-            {
-                var format = AppResources.CallSeconds_any;
-                var number = seconds;
-                if (number == 1)
-                {
-                    format = AppResources.CallSeconds_1;
-                }
-                else if (number == 2)
-                {
-                    format = AppResources.CallSeconds_2;
-                }
-                else if (number == 4)
-                {
-                    format = AppResources.CallSeconds_3_10;
-                }
-
-                return string.Format(format, number);
-            }
-            else if (seconds < 60 * 60)
-            {
-                var format = AppResources.CallMinutes_any;
-                var number = seconds / 60;
-                if (number == 1)
-                {
-                    format = AppResources.CallMinutes_1;
-                }
-                else if (number == 2)
-                {
-                    format = AppResources.CallMinutes_2;
-                }
-                else if (number == 4)
-                {
-                    format = AppResources.CallMinutes_3_10;
-                }
-
-                return string.Format(format, number);
-            }
-            else
-            {
-                var format = "{0} hours";
-                var number = seconds / (60 * 60);
-                if (number == 1)
-                {
-                    format = "{0} hours";
-                }
-                else if (number == 2)
-                {
-                    format = "{0} hours";
-                }
-                else if (number == 4)
-                {
-                    format = "{0} hours";
-                }
-
-                return string.Format(format, number);
-            }
-        }
-
-        public string CallShortDuration(int seconds)
-        {
-            if (seconds < 60)
-            {
-                var format = AppResources.CallShortSeconds_any;
-                var number = seconds;
-                if (number == 1)
-                {
-                    format = AppResources.CallShortSeconds_1;
-                }
-                else if (number == 2)
-                {
-                    format = AppResources.CallShortSeconds_2;
-                }
-                else if (number == 4)
-                {
-                    format = AppResources.CallShortSeconds_3_10;
-                }
-
-                return string.Format(format, number);
-            }
-            else
-            {
-                var format = AppResources.CallShortMinutes_any;
-                var number = seconds / 60;
-                if (number == 1)
-                {
-                    format = AppResources.CallShortMinutes_1;
-                }
-                else if (number == 2)
-                {
-                    format = AppResources.CallShortMinutes_2;
-                }
-                else if (number == 4)
-                {
-                    format = AppResources.CallShortMinutes_3_10;
-                }
-
-                return string.Format(format, number);
-            }
-        }
-
         public string DateExtended(int value)
         {
-            var clientDelta = MTProtoService.Current.ClientTicksDelta;
-            var utc0SecsLong = value * 4294967296 - clientDelta;
-            var utc0SecsInt = utc0SecsLong / 4294967296.0;
-            var dateTime = Utils.UnixTimestampToDateTime(utc0SecsInt);
+            var dateTime = Utils.UnixTimestampToDateTime(value);
 
             //Today
             if (dateTime.Date == System.DateTime.Now.Date)
@@ -381,44 +300,7 @@ namespace Unigram.Converters
 
         public DateTime DateTime(int value)
         {
-            var clientDelta = MTProtoService.Current.ClientTicksDelta;
-            var utc0SecsLong = value * 4294967296 - clientDelta;
-            var utc0SecsInt = utc0SecsLong / 4294967296.0;
-            var dateTime = Utils.UnixTimestampToDateTime(utc0SecsInt);
-
-            return dateTime;
-        }
-
-        public string State(TLMessageState value)
-        {
-            switch (value)
-            {
-                case TLMessageState.Sending:
-                    return "\uE600";
-                case TLMessageState.Confirmed:
-                    return "\uE602";
-                case TLMessageState.Read:
-                    return "\uE601";
-                default:
-                    return "\uFFFD";
-            }
-        }
-
-        public string Views(TLMessage message, int? views)
-        {
-            var number = string.Empty;
-
-            if (message.HasViews)
-            {
-                number = ShortNumber(views ?? 0);
-
-                if (message.IsPost && message.HasFromId && message.From != null)
-                {
-                    number += $"   {message.From.FullName},";
-                }
-            }
-
-            return number;
+            return Utils.UnixTimestampToDateTime(value);
         }
 
         public string ShortNumber(int number)

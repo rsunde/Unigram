@@ -2,29 +2,26 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Payments;
 using Unigram.Common;
 using Unigram.Controls;
 using Unigram.Converters;
-using Windows.System;
 using Windows.UI.Xaml.Navigation;
+using Unigram.Services;
+using Telegram.Td.Api;
 
 namespace Unigram.ViewModels.Payments
 {
     public class PaymentFormStep5ViewModel : PaymentFormViewModelBase
     {
-        private TLPaymentsValidatedRequestedInfo _requestedInfo;
+        private ValidatedOrderInfo _requestedInfo;
         private string _credentials;
         private bool _save;
 
-        public PaymentFormStep5ViewModel(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator)
-            : base(protoService, cacheService, aggregator)
+        public PaymentFormStep5ViewModel(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
             SendCommand = new RelayCommand(SendExecute, () => !IsLoading);
         }
@@ -32,53 +29,55 @@ namespace Unigram.ViewModels.Payments
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
             var buffer = parameter as byte[];
-            if (buffer != null)
+            if (buffer == null)
             {
-                using (var from = new TLBinaryReader(buffer))
-                {
-                    var tuple = new TLTuple<TLMessage, TLPaymentsPaymentForm, TLPaymentRequestedInfo, TLPaymentsValidatedRequestedInfo, TLShippingOption, string, string, bool>(from);
-
-                    Message = tuple.Item1;
-                    Invoice = tuple.Item1.Media as TLMessageMediaInvoice;
-                    PaymentForm = tuple.Item2;
-                    Info = tuple.Item3;
-                    Shipping = tuple.Item5;
-                    CredentialsTitle = string.IsNullOrEmpty(tuple.Item6) ? null : tuple.Item6;
-                    Bot = tuple.Item2.Users.FirstOrDefault(x => x.Id == tuple.Item2.BotId) as TLUser;
-                    Provider = tuple.Item2.Users.FirstOrDefault(x => x.Id == tuple.Item2.ProviderId) as TLUser;
-
-                    if (_paymentForm.HasSavedCredentials && _paymentForm.SavedCredentials is TLPaymentSavedCredentialsCard savedCard && _credentialsTitle == null)
-                    {
-                        CredentialsTitle = savedCard.Title;
-                    }
-
-                    var amount = 0L;
-                    foreach (var price in _paymentForm.Invoice.Prices)
-                    {
-                        amount += price.Amount;
-                    }
-
-                    if (_shipping != null)
-                    {
-                        foreach (var price in _shipping.Prices)
-                        {
-                            amount += price.Amount;
-                        }
-                    }
-
-                    TotalAmount = amount;
-
-                    _requestedInfo = tuple.Item4;
-                    _credentials = tuple.Item7;
-                    _save = tuple.Item8;
-                }
+                return Task.CompletedTask;
             }
+
+            //using (var from = TLObjectSerializer.CreateReader(buffer.AsBuffer()))
+            //{
+            //    var tuple = new TLTuple<TLMessage, TLPaymentsPaymentForm, TLPaymentRequestedInfo, TLPaymentsValidatedRequestedInfo, TLShippingOption, string, string, bool>(from);
+
+            //    Message = tuple.Item1;
+            //    Invoice = tuple.Item1.Media as TLMessageMediaInvoice;
+            //    PaymentForm = tuple.Item2;
+            //    Info = tuple.Item3;
+            //    Shipping = tuple.Item5;
+            //    CredentialsTitle = string.IsNullOrEmpty(tuple.Item6) ? null : tuple.Item6;
+            //    Bot = tuple.Item2.Users.FirstOrDefault(x => x.Id == tuple.Item2.BotId) as TLUser;
+            //    Provider = tuple.Item2.Users.FirstOrDefault(x => x.Id == tuple.Item2.ProviderId) as TLUser;
+
+            //    if (_paymentForm.HasSavedCredentials && _paymentForm.SavedCredentials is TLPaymentSavedCredentialsCard savedCard && _credentialsTitle == null)
+            //    {
+            //        CredentialsTitle = savedCard.Title;
+            //    }
+
+            //    var amount = 0L;
+            //    foreach (var price in _paymentForm.Invoice.Prices)
+            //    {
+            //        amount += price.Amount;
+            //    }
+
+            //    if (_shipping != null)
+            //    {
+            //        foreach (var price in _shipping.Prices)
+            //        {
+            //            amount += price.Amount;
+            //        }
+            //    }
+
+            //    TotalAmount = amount;
+
+            //    _requestedInfo = tuple.Item4;
+            //    _credentials = tuple.Item7;
+            //    _save = tuple.Item8;
+            //}
 
             return Task.CompletedTask;
         }
 
-        private TLUser _bot;
-        public TLUser Bot
+        private User _bot;
+        public User Bot
         {
             get
             {
@@ -90,8 +89,8 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        private TLUser _provider;
-        public TLUser Provider
+        private User _provider;
+        public User Provider
         {
             get
             {
@@ -129,8 +128,8 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        private TLPaymentRequestedInfo _info;
-        public TLPaymentRequestedInfo Info
+        private OrderInfo _info;
+        public OrderInfo Info
         {
             get
             {
@@ -142,8 +141,8 @@ namespace Unigram.ViewModels.Payments
             }
         }
 
-        public TLShippingOption _shipping;
-        public TLShippingOption Shipping
+        public ShippingOption _shipping;
+        public ShippingOption Shipping
         {
             get
             {
@@ -158,8 +157,9 @@ namespace Unigram.ViewModels.Payments
         public RelayCommand SendCommand { get; }
         private async void SendExecute()
         {
-            var confirm = await TLMessageDialog.ShowAsync(string .Format("Neither Telegram, nor {0} will have access to your credit card information. Credit card details will be handled only by the payment system, {1}.\n\nPayments will go directly to the developer of {0}. Telegram cannot provide any guarantees, so proceed at your own risk. In case of problems, please contact the developer of {0} or your bank.", _bot.FullName, _provider.FullName), "Transaction review", "OK", "Cancel");
-            //var confirm = await TLMessageDialog.ShowAsync(string.Format("Do you really want to transfer {0} to the {1} bot for {2}?", BindConvert.Current.FormatAmount(_totalAmount, _paymentForm.Invoice.Currency), _bot.FullName, _invoice.Title), "Transaction review", "OK", "Cancel");
+            var disclaimer = await TLMessageDialog.ShowAsync(string.Format(Strings.Resources.PaymentWarningText, _bot.FirstName, _provider.FirstName), Strings.Resources.PaymentWarning, Strings.Resources.OK);
+
+            var confirm = await TLMessageDialog.ShowAsync(string.Format(Strings.Resources.PaymentTransactionMessage, Locale.FormatCurrency(_totalAmount, _paymentForm.Invoice.Currency), _bot.FirstName, _invoice.Title), Strings.Resources.PaymentTransactionReview, Strings.Resources.OK, Strings.Resources.Cancel);
             if (confirm != Windows.UI.Xaml.Controls.ContentDialogResult.Primary)
             {
                 return;
@@ -167,33 +167,33 @@ namespace Unigram.ViewModels.Payments
 
             IsLoading = true;
 
-            TLInputPaymentCredentialsBase credentials;
-            if (_paymentForm.HasSavedCredentials && _paymentForm.SavedCredentials is TLPaymentSavedCredentialsCard savedCard)
-            {
-                credentials = new TLInputPaymentCredentialsSaved { Id = savedCard.Id, TmpPassword = ApplicationSettings.Current.TmpPassword.TmpPassword };
-            }
-            else
-            {
-                credentials = new TLInputPaymentCredentials { Data = new TLDataJSON { Data = _credentials }, IsSave = _save };
-            }
+            //TLInputPaymentCredentialsBase credentials;
+            //if (_paymentForm.HasSavedCredentials && _paymentForm.SavedCredentials is TLPaymentSavedCredentialsCard savedCard)
+            //{
+            //    credentials = new TLInputPaymentCredentialsSaved { Id = savedCard.Id, TmpPassword = ApplicationSettings.Current.TmpPassword.TmpPassword };
+            //}
+            //else
+            //{
+            //    credentials = new TLInputPaymentCredentials { Data = new TLDataJSON { Data = _credentials }, IsSave = _save };
+            //}
 
-            var response = await ProtoService.SendPaymentFormAsync(_message.Id, _requestedInfo?.Id, _shipping?.Id, credentials);
-            if (response.IsSucceeded)
-            {
-                if (response.Result is TLPaymentsPaymentVerficationNeeded verificationNeeded)
-                {
-                    if (Uri.TryCreate(verificationNeeded.Url, UriKind.Absolute, out Uri uri))
-                    {
-                        await Launcher.LaunchUriAsync(uri);
-                    }
-                }
+            //var response = await LegacyService.SendPaymentFormAsync(_message.Id, _requestedInfo?.Id, _shipping?.Id, credentials);
+            //if (response.IsSucceeded)
+            //{
+            //    if (response.Result is TLPaymentsPaymentVerficationNeeded verificationNeeded)
+            //    {
+            //        if (Uri.TryCreate(verificationNeeded.Url, UriKind.Absolute, out Uri uri))
+            //        {
+            //            await Launcher.LaunchUriAsync(uri);
+            //        }
+            //    }
 
-                NavigationService.GoBackAt(1);
-            }
-            else if (response.Error != null)
-            {
+            //    NavigationService.GoBackAt(1);
+            //}
+            //else if (response.Error != null)
+            //{
 
-            }
+            //}
         }
 
         public override void RaisePropertyChanged([CallerMemberName] string propertyName = null)

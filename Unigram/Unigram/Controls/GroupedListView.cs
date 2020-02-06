@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Unigram.Collections;
 using Unigram.Common;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -87,6 +88,11 @@ namespace Unigram.Controls
         {
             get
             {
+                if (ItemsSource is IGroupSupportIncrementalLoading loading)
+                {
+                    return loading;
+                }
+
                 return ViewSource?.Source as IGroupSupportIncrementalLoading;
             }
         }

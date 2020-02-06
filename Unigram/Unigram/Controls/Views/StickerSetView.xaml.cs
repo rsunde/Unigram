@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Telegram.Api.TL;
 using Unigram.Views;
 using Unigram.ViewModels;
 using Windows.Foundation;
@@ -23,65 +21,79 @@ using Windows.UI.ViewManagement;
 using Windows.Foundation.Metadata;
 using Windows.UI;
 using Template10.Utils;
-using Telegram.Api.TL.Messages;
-using Telegram.Api.Services.Cache;
 using Unigram.Converters;
+using Telegram.Td.Api;
+using Windows.Storage;
+using Unigram.Native;
+using Unigram.Common;
+using Unigram.Services;
+using Unigram.ViewModels.Delegates;
+using System.Threading.Tasks;
 
 namespace Unigram.Controls.Views
 {
-    public sealed partial class StickerSetView : ContentDialogBase
+    public sealed partial class StickerSetView : TLContentDialog, IHandle<UpdateFile>
     {
         public StickerSetViewModel ViewModel => DataContext as StickerSetViewModel;
 
         private StickerSetView()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<StickerSetViewModel>();
+            DataContext = TLContainer.Current.Resolve<StickerSetViewModel>();
+
+            SecondaryButtonText = Strings.Resources.Close;
         }
 
-        private static StickerSetView _current;
-        public static StickerSetView Current
+        private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            get
-            {
-                if (_current == null)
-                    _current = new StickerSetView();
+            ViewModel.Aggregator.Subscribe(this);
+        }
 
-                return _current;
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            ViewModel.Aggregator.Unsubscribe(this);
+        }
+
+        #region Show
+
+        private static Dictionary<int, WeakReference<StickerSetView>> _windowContext = new Dictionary<int, WeakReference<StickerSetView>>();
+        public static StickerSetView GetForCurrentView()
+        {
+            return new StickerSetView();
+
+            var id = ApplicationView.GetApplicationViewIdForWindow(Window.Current.CoreWindow);
+            if (_windowContext.TryGetValue(id, out WeakReference<StickerSetView> reference) && reference.TryGetTarget(out StickerSetView value))
+            {
+                return value;
             }
+
+            var context = new StickerSetView();
+            _windowContext[id] = new WeakReference<StickerSetView>(context);
+
+            return context;
         }
 
         public ItemClickEventHandler ItemClick { get; set; }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLStickerSet parameter)
+        public Task<ContentDialogResult> ShowAsync(StickerSet parameter)
         {
             return ShowAsync(parameter, null);
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLStickerSet parameter, ItemClickEventHandler callback)
+        public Task<ContentDialogResult> ShowAsync(StickerSet parameter, ItemClickEventHandler callback)
         {
-            return ShowAsync(new TLInputStickerSetID { Id = parameter.Id, AccessHash = parameter.AccessHash }, callback);
+            return ShowAsync(parameter.Id, callback);
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLStickerSetCoveredBase parameter)
-        {
-            return ShowAsync(parameter, null);
-        }
-
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLStickerSetCoveredBase parameter, ItemClickEventHandler callback)
-        {
-            return ShowAsync(new TLInputStickerSetID { Id = parameter.Set.Id, AccessHash = parameter.Set.AccessHash }, callback);
-        }
-
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLInputStickerSetBase parameter)
+        public Task<ContentDialogResult> ShowAsync(long parameter)
         {
             return ShowAsync(parameter, null);
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLInputStickerSetBase parameter, ItemClickEventHandler callback)
+        public Task<ContentDialogResult> ShowAsync(long parameter, ItemClickEventHandler callback)
         {
             ViewModel.IsLoading = true;
-            ViewModel.StickerSet = new TLStickerSet();
+            ViewModel.StickerSet = new StickerSet();
             ViewModel.Items.Clear();
 
             RoutedEventHandler handler = null;
@@ -93,228 +105,161 @@ namespace Unigram.Controls.Views
             });
 
             Loaded += handler;
-            return ShowAsync();
+            return this.ShowQueuedAsync();
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLMessagesStickerSet parameter)
+        public Task<ContentDialogResult> ShowAsync(string parameter)
         {
             return ShowAsync(parameter, null);
         }
 
-        public IAsyncOperation<ContentDialogBaseResult> ShowAsync(TLMessagesStickerSet parameter, ItemClickEventHandler callback)
+        public Task<ContentDialogResult> ShowAsync(string parameter, ItemClickEventHandler callback)
         {
-            ViewModel.IsLoading = false;
-            ViewModel.StickerSet = parameter.Set;
+            ViewModel.IsLoading = true;
+            ViewModel.StickerSet = new StickerSet();
             ViewModel.Items.Clear();
-            ViewModel.Items.Add(parameter);
 
-            return ShowAsync();
+            RoutedEventHandler handler = null;
+            handler = new RoutedEventHandler(async (s, args) =>
+            {
+                Loaded -= handler;
+                ItemClick = callback;
+                await ViewModel.OnNavigatedToAsync(parameter, NavigationMode.New, null);
+            });
+
+            Loaded += handler;
+            return this.ShowQueuedAsync();
         }
+
+        #endregion
+
+        #region Recycle
+
+        private async void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue)
+            {
+                return;
+            }
+
+            var content = args.ItemContainer.ContentTemplateRoot as Grid;
+            var sticker = args.Item as Sticker;
+
+            content.Tag = args.ItemContainer.Tag = new ViewModels.Dialogs.StickerViewModel(ViewModel.ProtoService, ViewModel.Aggregator, sticker);
+
+            if (args.Phase == 0)
+            {
+                var title = content.Children[1] as TextBlock;
+                title.Text = sticker.Emoji;
+            }
+            else if (args.Phase == 1)
+            {
+            }
+            else if (args.Phase == 2)
+            {
+                var photo = content.Children[0] as Image;
+
+                if (sticker == null || sticker.Thumbnail == null)
+                {
+                    return;
+                }
+
+                var file = sticker.Thumbnail.Photo;
+                if (file.Local.IsDownloadingCompleted)
+                {
+                    photo.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
+                }
+                else if (file.Local.CanBeDownloaded && !file.Local.IsDownloadingActive)
+                {
+                    photo.Source = null;
+                    ViewModel.ProtoService.DownloadFile(file.Id, 1);
+                }
+            }
+
+            if (args.Phase < 2)
+            {
+                args.RegisterUpdateCallback(OnContainerContentChanging);
+            }
+
+            args.Handled = true;
+        }
+
+        #endregion
+
+        #region Binding
 
         private string ConvertIsInstalled(bool installed, bool archived, bool official, bool masks)
         {
+            if (ViewModel == null || ViewModel.StickerSet == null || ViewModel.StickerSet.Stickers == null)
+            {
+                return string.Empty;
+            }
+
             if (installed && !archived)
             {
-                return official 
-                    ? string.Format(masks ? "Archive {0} masks" : "Archive {0} stickers", ViewModel.StickerSet.Count)
-                    : string.Format(masks ? "Remove {0} masks" : "Remove {0} stickers", ViewModel.StickerSet.Count);
+                return official
+                    ? string.Format(masks ? Strings.Resources.StickersRemove : Strings.Resources.StickersRemove, ViewModel.StickerSet.Stickers.Count)
+                    : string.Format(masks ? Strings.Resources.StickersRemove : Strings.Resources.StickersRemove, ViewModel.StickerSet.Stickers.Count);
             }
 
             return official || archived
-                ? string.Format(masks ? "Show {0} masks" : "Show {0} stickers", ViewModel.StickerSet.Count)
-                : string.Format(masks ? "Add {0} masks" : "Add {0} stickers", ViewModel.StickerSet.Count);
+                ? string.Format(masks ? Strings.Resources.AddMasks : Strings.Resources.AddStickers, ViewModel.StickerSet.Stickers.Count)
+                : string.Format(masks ? Strings.Resources.AddMasks : Strings.Resources.AddStickers, ViewModel.StickerSet.Stickers.Count);
         }
 
-        private Border LineTop;
-        private Border LineAccent;
+        #endregion
 
-        private ScrollViewer _scrollingHost;
+        #region Handle
 
-        private SpriteVisual _backgroundVisual;
-        private ExpressionAnimation _expression;
-        private ExpressionAnimation _expressionClip;
-
-        private void GridView_Loaded(object sender, RoutedEventArgs e)
+        public void Handle(UpdateFile update)
         {
-            var scroll = List.Descendants<ScrollViewer>().FirstOrDefault() as ScrollViewer;
-            if (scroll != null)
+            if (!update.File.Local.IsDownloadingCompleted)
             {
-                _scrollingHost = scroll;
-                _scrollingHost.ChangeView(null, 0, null, true);
-                scroll.ViewChanged += Scroll_ViewChanged;
-                Scroll_ViewChanged(scroll, null);
-
-                var brush = App.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-                var props = ElementCompositionPreview.GetScrollViewerManipulationPropertySet(scroll);
-
-                if (_backgroundVisual == null)
-                {
-                    _backgroundVisual = ElementCompositionPreview.GetElementVisual(BackgroundPanel).Compositor.CreateSpriteVisual();
-                    ElementCompositionPreview.SetElementChildVisual(BackgroundPanel, _backgroundVisual);
-                }
-
-                _backgroundVisual.Brush = _backgroundVisual.Compositor.CreateColorBrush(brush.Color);
-                _backgroundVisual.Size = new System.Numerics.Vector2((float)BackgroundPanel.ActualWidth, (float)BackgroundPanel.ActualHeight);
-                _backgroundVisual.Clip = _backgroundVisual.Compositor.CreateInsetClip();
-
-                _expression = _expression ?? _backgroundVisual.Compositor.CreateExpressionAnimation("Max(Maximum, Scrolling.Translation.Y)");
-                _expression.SetReferenceParameter("Scrolling", props);
-                _expression.SetScalarParameter("Maximum", -(float)BackgroundPanel.Margin.Top + 1);
-                _backgroundVisual.StopAnimation("Offset.Y");
-                _backgroundVisual.StartAnimation("Offset.Y", _expression);
-
-                _expressionClip = _expressionClip ?? _backgroundVisual.Compositor.CreateExpressionAnimation("Min(0, Maximum - Scrolling.Translation.Y)");
-                _expressionClip.SetReferenceParameter("Scrolling", props);
-                _expressionClip.SetScalarParameter("Maximum", -(float)BackgroundPanel.Margin.Top + 1);
-                _backgroundVisual.Clip.StopAnimation("Offset.Y");
-                _backgroundVisual.Clip.StartAnimation("Offset.Y", _expressionClip);
+                return;
             }
 
-            var panel = List.ItemsPanelRoot as ItemsWrapGrid;
-            if (panel != null)
-            {
-                panel.SizeChanged += (s, args) =>
-                {
-                    Scroll_ViewChanged(scroll, null);
-                };
-            }
+            this.BeginOnUIThread(() => UpdateFile(update.File));
         }
 
-        private void GroupHeader_Loaded(object sender, RoutedEventArgs e)
+        public async void UpdateFile(File file)
         {
-            var groupHeader = sender as Grid;
-            if (groupHeader != null)
+            foreach (Sticker sticker in List.Items)
             {
-                LineTop = groupHeader.FindName("LineTop") as Border;
-                LineAccent = groupHeader.FindName("LineAccent") as Border;
-
-                if (_scrollingHost != null)
+                if (sticker.UpdateFile(file) && file.Id == sticker.Thumbnail?.Photo.Id)
                 {
-                    Scroll_ViewChanged(_scrollingHost, null);
+                    var container = List.ContainerFromItem(sticker) as SelectorItem;
+                    if (container == null)
+                    {
+                        continue;
+                    }
+
+                    var content = container.ContentTemplateRoot as Grid;
+                    if (content == null)
+                    {
+                        continue;
+                    }
+
+                    var photo = content.Children[0] as Image;
+                    photo.Source = await PlaceholderHelper.GetWebpAsync(file.Local.Path);
                 }
             }
         }
 
-        private void Scroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
+        #endregion
+
+        private async void Share_Click(object sender, RoutedEventArgs e)
         {
-            var scroll = sender as ScrollViewer;
-            var top = 1;
-            var accent = 0;
-            var bottom = 1;
-
-            if (scroll.VerticalOffset <= BackgroundPanel.Margin.Top)
+            var stickerSet = ViewModel.StickerSet;
+            if (stickerSet == null)
             {
-                top = 0;
-            }
-            if (scroll.VerticalOffset < BackgroundPanel.Margin.Top)
-            {
-                accent = 1;
-            }
-            if (scroll.VerticalOffset == scroll.ScrollableHeight)
-            {
-                bottom = 0;
+                return;
             }
 
-            //if (LineTop.BorderThickness.Bottom != top)
-            //{
-            //    if (top == 0)
-            //    {
-            //        MaskTitleAndStatusBar();
-            //    }
-            //    else
-            //    {
-            //        SetupTitleAndStatusBar();
-            //    }
-            //}
+            var title = stickerSet.Title;
+            var link = new Uri(MeUrlPrefixConverter.Convert(ViewModel.ProtoService, $"addstickers/{stickerSet.Name}"));
 
-            if (LineTop != null)
-            {
-                LineTop.BorderThickness = new Thickness(0, 0, 0, top);
-                LineAccent.BorderThickness = new Thickness(0, accent, 0, 0);
-                LineBottom.BorderThickness = new Thickness(0, bottom, 0, 0);
-            }
-        }
-
-        // SystemControlBackgroundChromeMediumLowBrush
-
-        private void SetupTitleAndStatusBar()
-        {
-            var titlebar = ApplicationView.GetForCurrentView().TitleBar;
-            var backgroundBrush = Application.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-            var foregroundBrush = Application.Current.Resources["SystemControlForegroundBaseHighBrush"] as SolidColorBrush;
-
-            titlebar.BackgroundColor = backgroundBrush.Color;
-            titlebar.ForegroundColor = foregroundBrush.Color;
-            titlebar.ButtonBackgroundColor = backgroundBrush.Color;
-            titlebar.ButtonForegroundColor = foregroundBrush.Color;
-
-            if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.StatusBar"))
-            {
-                var statusBar = StatusBar.GetForCurrentView();
-                statusBar.BackgroundColor = backgroundBrush.Color;
-                statusBar.ForegroundColor = foregroundBrush.Color;
-            }
-        }
-
-        private void List_SizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            var itemWidth = (e.NewSize.Width - 24) / 5d;
-            var minHeigth = itemWidth * 3d - 12 + 48;
-            var top = Math.Max(0, e.NewSize.Height - minHeigth);
-
-            if (!IsFullScreenMode())
-            {
-                top = 0;
-            }
-
-            if (top == 0)
-            {
-                Header.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                Header.Visibility = Visibility.Visible;
-            }
-
-            Header.Height = top;
-
-            BackgroundPanel.Height = e.NewSize.Height;
-            BackgroundPanel.Margin = new Thickness(0, top, 0, -top);
-
-            if (_backgroundVisual != null && _expression != null && _expressionClip != null)
-            {
-                var brush = App.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"] as SolidColorBrush;
-
-                _backgroundVisual.Brush = _backgroundVisual.Compositor.CreateColorBrush(brush.Color);
-                _backgroundVisual.Size = new System.Numerics.Vector2((float)e.NewSize.Width, (float)e.NewSize.Height);
-                _backgroundVisual.Clip = _backgroundVisual.Compositor.CreateInsetClip();
-
-                _expression.SetScalarParameter("Maximum", -(float)top + 1);
-                _backgroundVisual.StopAnimation("Offset.Y");
-                _backgroundVisual.StartAnimation("Offset.Y", _expression);
-
-                _expressionClip.SetScalarParameter("Maximum", -(float)top + 1);
-                _backgroundVisual.Clip.StopAnimation("Offset.Y");
-                _backgroundVisual.Clip.StartAnimation("Offset.Y", _expressionClip);
-            }
-        }
-
-        //protected override void UpdateView(Rect bounds)
-        //{
-        //    if (BackgroundElement == null) return;
-
-        //    BackgroundElement.MinHeight = bounds.Height;
-        //    BackgroundElement.BorderThickness = new Thickness(0);
-        //}
-
-        private void LightDismiss_Tapped(object sender, TappedRoutedEventArgs e)
-        {
-            Hide(ContentDialogBaseResult.None);
-        }
-
-        private void Close_Click(object sender, RoutedEventArgs e)
-        {
-            Hide(ContentDialogBaseResult.Cancel);
+            Hide();
+            await ShareView.GetForCurrentView().ShowAsync(link, title);
         }
 
         private void List_ItemClick(object sender, ItemClickEventArgs e)
@@ -322,16 +267,8 @@ namespace Unigram.Controls.Views
             if (ItemClick != null)
             {
                 ItemClick.Invoke(this, e);
-                Hide(ContentDialogBaseResult.OK);
+                Hide();
             }
-        }
-
-        private async void Share_Click(object sender, RoutedEventArgs e)
-        {
-            var title = ViewModel.StickerSet.Title;
-            var link = new Uri(UsernameToLinkConverter.Convert($"addstickers/{ViewModel.StickerSet.ShortName}"));
-
-            await ShareView.Current.ShowAsync(link, title);
         }
     }
 }

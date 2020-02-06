@@ -1,33 +1,32 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache.EventArgs;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Messages;
+using Telegram.Td.Api;
 using Unigram.Common;
 using Unigram.Controls;
 using Unigram.Controls.Views;
 using Unigram.Converters;
-using Unigram.Helpers;
-using Unigram.Native;
 using Unigram.Services;
+using Unigram.Native;
 using Unigram.Views;
 using Unigram.Views.Payments;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics.Imaging;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.Storage.Streams;
 using Windows.System;
 using Windows.UI.Popups;
 using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Controls.Primitives;
+using Windows.UI.Xaml;
+using Template10.Common;
 
 namespace Unigram.ViewModels
 {
@@ -35,233 +34,135 @@ namespace Unigram.ViewModels
     {
         #region Reply
 
-        public RelayCommand<TLMessageBase> MessageReplyCommand { get; }
-        private void MessageReplyExecute(TLMessageBase message)
+        public RelayCommand MessageReplyPreviousCommand { get; }
+        private async void MessageReplyPreviousExecute()
         {
-            Search = null;
+            MessageViewModel last = null;
+
+            var data = _composerHeader;
+            if (data != null && data.ReplyToMessage != null)
+            {
+                last = Items.Reverse().FirstOrDefault(x => x.Id != 0 && x.Id < data.ReplyToMessage.Id) ?? Items.LastOrDefault();
+            }
+            else
+            {
+                last = Items.LastOrDefault();
+            }
+
+            if (last != null)
+            {
+                MessageReplyCommand.Execute(last);
+                await ListField?.ScrollToItem(last, VerticalAlignment.Center, true);
+            }
+        }
+
+        public RelayCommand MessageReplyNextCommand { get; }
+        private async void MessageReplyNextExecute()
+        {
+            MessageViewModel last = null;
+
+            var data = _composerHeader;
+            if (data != null && data.ReplyToMessage != null)
+            {
+                last = Items.FirstOrDefault(x => x.Id != 0 && x.Id > data.ReplyToMessage.Id);
+            }
+
+            if (last != null)
+            {
+                MessageReplyCommand.Execute(last);
+                await ListField?.ScrollToItem(last, VerticalAlignment.Center, true);
+            }
+            else
+            {
+                ClearReplyCommand.Execute();
+            }
+        }
+
+        public RelayCommand<MessageViewModel> MessageReplyCommand { get; }
+        private void MessageReplyExecute(MessageViewModel message)
+        {
+            DisposeSearch();
 
             if (message == null)
             {
                 return;
             }
 
-            var serviceMessage = message as TLMessageService;
-            if (serviceMessage != null)
+            if (message.Content is MessageAlbum album)
             {
-                var action = serviceMessage.Action;
-                // TODO: 
-                //if (action is TLMessageActionEmpty || action is TLMessageActionUnreadMessages)
-                //{
-                //    return;
-                //}
+                message = album.Layout.Messages.FirstOrDefault();
             }
 
-            if (message.Id <= 0) return;
-
-            var message31 = message as TLMessage;
-            if (message31 != null && !message31.IsOut && message31.HasFromId)
-            {
-                var fromId = message31.FromId.Value;
-                var user = CacheService.GetUser(fromId) as TLUser;
-                if (user != null && user.IsBot)
-                {
-                    // TODO: SetReplyMarkup(message31);
-                }
-            }
-
-            Reply = message;
-            TextField.Focus(Windows.UI.Xaml.FocusState.Keyboard);
+            ComposerHeader = new MessageComposerHeader { ReplyToMessage = message };
+            TextField?.Focus(FocusState.Keyboard);
         }
 
         #endregion
 
         #region Delete
 
-        public RelayCommand<TLMessageBase> MessageDeleteCommand { get; }
-        private async void MessageDeleteExecute(TLMessageBase messageBase)
+        public RelayCommand<MessageViewModel> MessageDeleteCommand { get; }
+        private void MessageDeleteExecute(MessageViewModel message)
         {
-            if (messageBase == null) return;
-
-            var message = messageBase as TLMessage;
-            if (message != null && !message.IsOut && !message.IsPost && Peer is TLInputPeerChannel)
+            if (message == null)
             {
-                var dialog = new DeleteChannelMessageDialog();
+                return;
+            }
 
-                var result = await dialog.ShowQueuedAsync();
-                if (result == ContentDialogResult.Primary)
-                {
-                    var channel = With as TLChannel;
+            var chat = message.GetChat();
+            if (chat == null)
+            {
+                return;
+            }
 
-                    if (dialog.DeleteAll)
-                    {
-                        // TODO
-                    }
-                    else
-                    {
-                        var messages = new List<TLMessageBase>() { messageBase };
-                        if (messageBase.Id == 0 && messageBase.RandomId != 0L)
-                        {
-                            DeleteMessagesInternal(null, messages);
-                            return;
-                        }
+            //if (message != null && message.Media is TLMessageMediaGroup groupMedia)
+            //{
+            //    ExpandSelection(new[] { message });
+            //    MessagesDeleteExecute();
+            //    return;
+            //}
 
-                        DeleteMessages(null, null, messages, true, null, DeleteMessagesInternal);
-                    }
+            MessagesDelete(chat, new[] { message });
 
-                    if (dialog.BanUser)
-                    {
-                        // TODO: layer 68
-                        //var response = await ProtoService.KickFromChannelAsync(channel, message.From.ToInputUser(), true);
-                        //if (response.IsSucceeded)
-                        //{
-                        //    var updates = response.Result as TLUpdates;
-                        //    if (updates != null)
-                        //    {
-                        //        var newChannelMessageUpdate = updates.Updates.OfType<TLUpdateNewChannelMessage>().FirstOrDefault();
-                        //        if (newChannelMessageUpdate != null)
-                        //        {
-                        //            Aggregator.Publish(newChannelMessageUpdate.Message);
-                        //        }
-                        //    }
-                        //}
-                    }
+            TextField?.Focus(FocusState.Programmatic);
+        }
 
-                    if (dialog.ReportSpam)
-                    {
-                        var response = await ProtoService.ReportSpamAsync(channel.ToInputChannel(), message.From.ToInputUser(), new TLVector<int> { message.Id });
-                    }
-                }
+        private async void MessagesDelete(Chat chat, IList<MessageViewModel> messages)
+        {
+            var first = messages.FirstOrDefault();
+            if (first == null)
+            {
+                return;
+            }
+
+            var sameUser = messages.All(x => x.SenderUserId == first.SenderUserId);
+            var dialog = new DeleteMessagesView(CacheService, messages.Select(x => x.Get()).ToArray());
+
+            var confirm = await dialog.ShowQueuedAsync();
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            SelectionMode = ListViewSelectionMode.None;
+
+            if (dialog.DeleteAll && sameUser)
+            {
+                ProtoService.Send(new DeleteChatMessagesFromUser(chat.Id, first.SenderUserId));
             }
             else
             {
-                var dialog = new TLMessageDialog();
-                dialog.Title = "Delete";
-                dialog.Message = "Do you want to delete this message?";
-                dialog.PrimaryButtonText = "Yes";
-                dialog.SecondaryButtonText = "No";
-
-                var chat = With as TLChat;
-
-                if (message != null && (message.IsOut || (chat != null && (chat.IsCreator || chat.IsAdmin))) && message.ToId.Id != SettingsHelper.UserId && (Peer is TLInputPeerUser || Peer is TLInputPeerChat))
-                {
-                    var date = TLUtils.DateToUniversalTimeTLInt(ProtoService.ClientTicksDelta, DateTime.Now);
-                    var config = CacheService.GetConfig();
-                    if (config != null && message.Date + config.EditTimeLimit > date)
-                    {
-                        var user = With as TLUser;
-                        if (user != null && !user.IsBot)
-                        {
-                            dialog.CheckBoxLabel = string.Format("Delete for {0}", user.FullName);
-                        }
-
-                        //var chat = With as TLChat;
-                        if (chat != null)
-                        {
-                            dialog.CheckBoxLabel = "Delete for everyone";
-                        }
-                    }
-                }
-                else if (Peer is TLInputPeerUser && With is TLUser user && !user.IsSelf)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it just for you.";
-                }
-                else if (Peer is TLInputPeerChat)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it just for you, not for other participants of the chat.";
-                }
-                else if (Peer is TLInputPeerChannel)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it for everyone in this chat.";
-                }
-
-                var result = await dialog.ShowQueuedAsync();
-                if (result == ContentDialogResult.Primary)
-                {
-                    var revoke = dialog.IsChecked == true;
-
-                    var messages = new List<TLMessageBase>() { messageBase };
-                    if (messageBase.Id == 0 && messageBase.RandomId != 0L)
-                    {
-                        await TLMessageDialog.ShowAsync("This message has no ID, so it will be deleted locally only.", "Warning", "OK");
-
-                        DeleteMessagesInternal(null, messages);
-                        return;
-                    }
-
-                    DeleteMessages(null, null, messages, revoke, null, DeleteMessagesInternal);
-                }
-            }
-        }
-
-        private void DeleteMessagesInternal(TLMessageBase lastMessage, IList<TLMessageBase> messages)
-        {
-            var cachedMessages = new TLVector<long>();
-            var remoteMessages = new TLVector<int>();
-            for (int i = 0; i < messages.Count; i++)
-            {
-                if (messages[i].RandomId.HasValue && messages[i].RandomId != 0L)
-                {
-                    cachedMessages.Add(messages[i].RandomId.Value);
-                }
-                if (messages[i].Id > 0)
-                {
-                    remoteMessages.Add(messages[i].Id);
-                }
+                ProtoService.Send(new DeleteMessages(chat.Id, messages.Select(x => x.Id).ToList(), dialog.Revoke));
             }
 
-            CacheService.DeleteMessages(Peer.ToPeer(), lastMessage, remoteMessages);
-            CacheService.DeleteMessages(cachedMessages);
-
-            BeginOnUIThread(() =>
+            if (dialog.BanUser && sameUser)
             {
-                for (int j = 0; j < messages.Count; j++)
-                {
-                    if (EditedMessage?.Id == messages[j].Id)
-                    {
-                        ClearReplyCommand.Execute();
-                    }
-                    else if (ReplyInfo?.ReplyToMsgId == messages[j].Id)
-                    {
-                        ClearReplyCommand.Execute();
-                    }
-
-                    Items.Remove(messages[j]);
-                }
-
-                RaisePropertyChanged(() => With);
-                SelectionMode = ListViewSelectionMode.None;
-
-                //this.IsEmptyDialog = (this.Items.get_Count() == 0 && this.LazyItems.get_Count() == 0);
-                //this.NotifyOfPropertyChange<TLObject>(() => this.With);
-            });
-        }
-
-        public async void DeleteMessages(TLMessageBase lastItem, IList<TLMessageBase> localMessages, IList<TLMessageBase> remoteMessages, bool revoke, Action<TLMessageBase, IList<TLMessageBase>> localCallback = null, Action<TLMessageBase, IList<TLMessageBase>> remoteCallback = null)
-        {
-            if (localMessages != null && localMessages.Count > 0)
-            {
-                localCallback?.Invoke(lastItem, localMessages);
+                ProtoService.Send(new SetChatMemberStatus(chat.Id, first.SenderUserId, new ChatMemberStatusBanned()));
             }
-            if (remoteMessages != null && remoteMessages.Count > 0)
+
+            if (dialog.ReportSpam && sameUser && chat.Type is ChatTypeSupergroup supertype)
             {
-                var messages = new TLVector<int>(remoteMessages.Select(x => x.Id).ToList());
-
-                Task<MTProtoResponse<TLMessagesAffectedMessages>> task;
-
-                if (Peer is TLInputPeerChannel)
-                {
-                    task = ProtoService.DeleteMessagesAsync(new TLInputChannel { ChannelId = ((TLInputPeerChannel)Peer).ChannelId, AccessHash = ((TLInputPeerChannel)Peer).AccessHash }, messages);
-                }
-                else
-                {
-                    task = ProtoService.DeleteMessagesAsync(messages, revoke);
-                }
-
-                var response = await task;
-                if (response.IsSucceeded)
-                {
-                    remoteCallback?.Invoke(lastItem, remoteMessages);
-                }
+                ProtoService.Send(new ReportSupergroupSpam(supertype.SupergroupId, first.SenderUserId, messages.Select(x => x.Id).ToList()));
             }
         }
 
@@ -269,266 +170,472 @@ namespace Unigram.ViewModels
 
         #region Forward
 
-        public RelayCommand<TLMessageBase> MessageForwardCommand { get; }
-        private async void MessageForwardExecute(TLMessageBase messageBase)
+        public RelayCommand<MessageViewModel> MessageForwardCommand { get; }
+        private async void MessageForwardExecute(MessageViewModel message)
         {
-            if (messageBase is TLMessage message)
-            {
-                Search = null;
-                SelectionMode = ListViewSelectionMode.None;
+            //if (messageBase is TLMessage message)
+            //{
+            //    if (message.Media is TLMessageMediaGroup groupMedia)
+            //    {
+            //        ExpandSelection(new[] { message });
+            //        MessagesForwardExecute();
+            //        return;
+            //    }
 
-                await ShareView.Current.ShowAsync(message);
-            }
+            //    Search = null;
+            //    SelectionMode = ListViewSelectionMode.None;
+
+            //    await ShareView.GetForCurrentView().ShowAsync(message);
+            //}
+
+            DisposeSearch();
+            SelectionMode = ListViewSelectionMode.None;
+
+            await ShareView.GetForCurrentView().ShowAsync(message.Get());
+
+            TextField?.Focus(FocusState.Programmatic);
         }
 
         #endregion
 
         #region Share
 
-        public RelayCommand<TLMessage> MessageShareCommand { get; }
-        private async void MessageShareExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageShareCommand { get; }
+        private async void MessageShareExecute(MessageViewModel message)
         {
-            await ShareView.Current.ShowAsync(message);
+            if (message.Content is MessageAlbum album)
+            {
+                await ShareView.GetForCurrentView().ShowAsync(album.Layout.Messages.Select(x => x.Get()).ToList());
+            }
+            else
+            {
+                await ShareView.GetForCurrentView().ShowAsync(message.Get());
+            }
         }
 
         #endregion
 
         #region Multiple Delete
 
-        private RelayCommand _messagesDeleteCommand;
-        public RelayCommand MessagesDeleteCommand => _messagesDeleteCommand = (_messagesDeleteCommand ?? new RelayCommand(MessagesDeleteExecute, () => SelectedItems.Count > 0 && SelectedItems.All(messageCommon =>
+        public RelayCommand MessagesDeleteCommand { get; }
+        private void MessagesDeleteExecute()
         {
-            var channel = _with as TLChannel;
-            if (channel != null)
+            var messages = new List<MessageViewModel>(SelectedItems);
+
+            var first = messages.FirstOrDefault();
+            if (first == null)
             {
-                if (messageCommon.Id == 1 && messageCommon.ToId is TLPeerChannel)
-                {
-                    return false;
-                }
-
-                if (messageCommon.IsOut || channel.IsCreator || (channel.HasAdminRights && channel.AdminRights.IsDeleteMessages))
-                {
-                    return true;
-                }
-
-                return false;
+                return;
             }
 
-            return true;
-        })));
-
-        private async void MessagesDeleteExecute()
-        {
-            //if (messageBase == null) return;
-
-            //var message = messageBase as TLMessage;
-            //if (message != null && !message.IsOut && !message.IsPost && Peer is TLInputPeerChannel)
-            //{
-            //    var dialog = new DeleteChannelMessageDialog();
-
-            //    var result = await dialog.ShowAsync();
-            //    if (result == ContentDialogResult.Primary)
-            //    {
-            //        var channel = With as TLChannel;
-
-            //        if (dialog.DeleteAll)
-            //        {
-            //            // TODO
-            //        }
-            //        else
-            //        {
-            //            var messages = new List<TLMessageBase>() { messageBase };
-            //            if (messageBase.Id == 0 && messageBase.RandomId != 0L)
-            //            {
-            //                DeleteMessagesInternal(null, messages);
-            //                return;
-            //            }
-
-            //            DeleteMessages(null, null, messages, true, null, DeleteMessagesInternal);
-            //        }
-
-            //        if (dialog.BanUser)
-            //        {
-            //            var response = await ProtoService.KickFromChannelAsync(channel, message.From.ToInputUser(), true);
-            //            if (response.IsSucceeded)
-            //            {
-            //                var updates = response.Result as TLUpdates;
-            //                if (updates != null)
-            //                {
-            //                    var newChannelMessageUpdate = updates.Updates.OfType<TLUpdateNewChannelMessage>().FirstOrDefault();
-            //                    if (newChannelMessageUpdate != null)
-            //                    {
-            //                        Aggregator.Publish(newChannelMessageUpdate.Message);
-            //                    }
-            //                }
-            //            }
-            //        }
-
-            //        if (dialog.ReportSpam)
-            //        {
-            //            var response = await ProtoService.ReportSpamAsync(channel.ToInputChannel(), message.From.ToInputUser(), new TLVector<int> { message.Id });
-            //        }
-            //    }
-            //}
-            //else
+            var chat = first.GetChat();
+            if (chat == null)
             {
-                var messages = new List<TLMessageCommonBase>(SelectedItems);
-
-                var dialog = new TLMessageDialog();
-                dialog.Title = "Delete";
-                dialog.Message = messages.Count > 1 ? string.Format("Do you want to delete this {0} messages?", messages.Count) : "Do you want to delete this message?";
-                dialog.PrimaryButtonText = "Yes";
-                dialog.SecondaryButtonText = "No";
-
-                var chat = With as TLChat;
-
-                var isOut = messages.All(x => x.IsOut);
-                var toId = messages.FirstOrDefault().ToId;
-                var minDate = messages.OrderBy(x => x.Date).FirstOrDefault().Date;
-                var maxDate = messages.OrderByDescending(x => x.Date).FirstOrDefault().Date;
-
-                if ((isOut || (chat != null && (chat.IsCreator || chat.IsAdmin))) && toId.Id != SettingsHelper.UserId && (Peer is TLInputPeerUser || Peer is TLInputPeerChat))
-                {
-                    var date = TLUtils.DateToUniversalTimeTLInt(ProtoService.ClientTicksDelta, DateTime.Now);
-                    var config = CacheService.GetConfig();
-                    if (config != null && minDate + config.EditTimeLimit > date && maxDate + config.EditTimeLimit > date)
-                    {
-                        var user = With as TLUser;
-                        if (user != null && !user.IsBot)
-                        {
-                            dialog.CheckBoxLabel = string.Format("Delete for {0}", user.FullName);
-                        }
-
-                        //var chat = With as TLChat;
-                        if (chat != null)
-                        {
-                            dialog.CheckBoxLabel = "Delete for everyone";
-                        }
-                    }
-                }
-                else if (Peer is TLInputPeerUser && With is TLUser user && !user.IsSelf)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it just for you.";
-                }
-                else if (Peer is TLInputPeerChat)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it just for you, not for other participants of the chat.";
-                }
-                else if (Peer is TLInputPeerChannel)
-                {
-                    dialog.Message += "\r\n\r\nThis will delete it for everyone in this chat.";
-                }
-
-                var result = await dialog.ShowQueuedAsync();
-                if (result == ContentDialogResult.Primary)
-                {
-                    var revoke = dialog.IsChecked == true;
-
-                    var localMessages = new List<TLMessageBase>();
-                    var remoteMessages = new List<TLMessageBase>();
-                    for (int i = 0; i < messages.Count; i++)
-                    {
-                        var message = messages[i];
-                        if (message.Id == 0 && message.RandomId != 0L)
-                        {
-                            localMessages.Add(message);
-                        }
-                        else if (message.Id != 0)
-                        {
-                            remoteMessages.Add(message);
-                        }
-                    }
-
-                    DeleteMessages(null, localMessages, remoteMessages, revoke, DeleteMessagesInternal, DeleteMessagesInternal);
-                }
+                return;
             }
+
+            MessagesDelete(chat, messages);
+        }
+
+        private bool MessagesDeleteCanExecute()
+        {
+            return SelectedItems.Count > 0 && SelectedItems.All(x => x.CanBeDeletedForAllUsers || x.CanBeDeletedOnlyForSelf);
         }
 
         #endregion
 
         #region Multiple Forward
 
-        private RelayCommand _messagesForwardCommand;
-        public RelayCommand MessagesForwardCommand => _messagesForwardCommand = (_messagesForwardCommand ?? new RelayCommand(MessagesForwardExecute, () => SelectedItems.Count > 0 && SelectedItems.All(x =>
-        {
-            if (x is TLMessage message)
-            {
-                if (message.Media is TLMessageMediaPhoto photoMedia)
-                {
-                    return !photoMedia.HasTTLSeconds;
-                }
-                else if (message.Media is TLMessageMediaDocument documentMedia)
-                {
-                    return !documentMedia.HasTTLSeconds;
-                }
-
-                return true;
-            }
-
-            return false;
-        })));
-
+        public RelayCommand MessagesForwardCommand { get; }
         private async void MessagesForwardExecute()
         {
-            var messages = SelectedItems.OfType<TLMessage>().Where(x => x.Id != 0).OrderBy(x => x.Id).ToList();
+            var messages = SelectedItems.Where(x => x.CanBeForwarded).OrderBy(x => x.Id).Select(x => x.Get()).ToList();
             if (messages.Count > 0)
             {
-                Search = null;
+                DisposeSearch();
                 SelectionMode = ListViewSelectionMode.None;
 
-                await ShareView.Current.ShowAsync(messages);
+                await ShareView.GetForCurrentView().ShowAsync(messages);
+
+                TextField?.Focus(FocusState.Programmatic);
             }
+        }
+
+        private bool MessagesForwardCanExecute()
+        {
+            return SelectedItems.Count > 0 && SelectedItems.All(x => x.CanBeForwarded);
+        }
+
+        #endregion
+
+        #region Multiple Copy
+
+        public RelayCommand MessagesCopyCommand { get; }
+        private void MessagesCopyExecute()
+        {
+            var messages = SelectedItems.OrderBy(x => x.Id).ToList();
+            if (messages.Count > 0)
+            {
+                var builder = new StringBuilder();
+                SelectionMode = ListViewSelectionMode.None;
+
+                foreach (var message in messages)
+                {
+                    var chat = message.GetChat();
+                    var title = chat.Title;
+
+                    if (chat.Type is ChatTypeSupergroup super && super.IsChannel)
+                    {
+                        title = ProtoService.GetTitle(chat);
+                    }
+                    else
+                    {
+                        var sender = message.GetSenderUser();
+                        if (sender != null)
+                        {
+                            title = sender.GetFullName();
+                        }
+                    }
+
+                    var date = BindConvert.Current.DateTime(message.Date);
+                    builder.AppendLine(string.Format("{0}, [{1} {2}]", title, BindConvert.Current.ShortDate.Format(date), BindConvert.Current.ShortTime.Format(date)));
+
+                    if (message.ForwardInfo?.Origin is MessageForwardOriginChannel forwardedPost)
+                    {
+                        var from = ProtoService.GetChat(forwardedPost.ChatId);
+                        builder.AppendLine($"[{Strings.Resources.ForwardedMessage}]");
+                        builder.AppendLine($"[{Strings.Resources.From} {ProtoService.GetTitle(from)}]");
+                    }
+                    else if (message.ForwardInfo?.Origin is MessageForwardOriginUser forwardedFromUser)
+                    {
+                        var from = ProtoService.GetUser(forwardedFromUser.SenderUserId);
+                        builder.AppendLine($"[{Strings.Resources.ForwardedMessage}]");
+                        builder.AppendLine($"[{Strings.Resources.From} {from.GetFullName()}]");
+                    }
+                    else if (message.ForwardInfo?.Origin is MessageForwardOriginHiddenUser forwardedFromHiddenUser)
+                    {
+                        builder.AppendLine($"[{Strings.Resources.ForwardedMessage}]");
+                        builder.AppendLine($"[{Strings.Resources.From} {forwardedFromHiddenUser.SenderName}]");
+                    }
+
+                    if (message.ReplyToMessage != null)
+                    {
+                        var replySender = message.ReplyToMessage.GetSenderUser();
+                        if (replySender != null)
+                        {
+                            builder.AppendLine($"[In reply to {replySender.GetFullName()}]");
+                        }
+                    }
+
+                    if (message.Content is MessagePhoto photo)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachPhoto}]");
+
+                        if (photo.Caption != null && !string.IsNullOrEmpty(photo.Caption.Text))
+                        {
+                            builder.AppendLine();
+                            builder.AppendLine(photo.Caption.Text);
+                        }
+                    }
+                    else if (message.Content is MessageVoiceNote voiceNote)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachAudio}]");
+
+                        if (voiceNote.Caption != null && !string.IsNullOrEmpty(voiceNote.Caption.Text))
+                        {
+                            builder.AppendLine();
+                            builder.AppendLine(voiceNote.Caption.Text);
+                        }
+                    }
+                    else if (message.Content is MessageVideo video)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachVideo}]");
+
+                        if (video.Caption != null && !string.IsNullOrEmpty(video.Caption.Text))
+                        {
+                            builder.AppendLine();
+                            builder.AppendLine(video.Caption.Text);
+                        }
+                    }
+                    else if (message.Content is MessageVideoNote)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachRound}]");
+                    }
+                    else if (message.Content is MessageAnimation animation)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachGif}]");
+
+                        if (animation.Caption != null && !string.IsNullOrEmpty(animation.Caption.Text))
+                        {
+                            builder.AppendLine();
+                            builder.AppendLine(animation.Caption.Text);
+                        }
+                    }
+                    else if (message.Content is MessageSticker sticker)
+                    {
+                        if (!string.IsNullOrEmpty(sticker.Sticker.Emoji))
+                        {
+                            builder.AppendLine($"[{sticker.Sticker.Emoji} {Strings.Resources.AttachSticker}]");
+                        }
+                        else
+                        {
+                            builder.AppendLine($"[{Strings.Resources.AttachSticker}]");
+                        }
+                    }
+                    else if (message.Content is MessageAudio audio)
+                    {
+                        builder.Append($"[{Strings.Resources.AttachMusic}]");
+
+                        if (audio.Caption != null && !string.IsNullOrEmpty(audio.Caption.Text))
+                        {
+                            builder.AppendLine();
+                            builder.AppendLine(audio.Caption.Text);
+                        }
+                    }
+                    else if (message.Content is MessageLocation location)
+                    {
+                        builder.AppendLine($"[{Strings.Resources.AttachLocation}]");
+                        builder.AppendLine(string.Format(CultureInfo.InvariantCulture, "https://www.bing.com/maps/?pc=W8AP&FORM=MAPXSH&where1=44.312783,9.33426&locsearch=1", location.Location.Latitude, location.Location.Longitude));
+                    }
+                    else if (message.Content is MessageVenue venue)
+                    {
+                        builder.AppendLine($"[{Strings.Resources.AttachLocation}]");
+                        builder.AppendLine(venue.Venue.Title);
+                        builder.AppendLine(venue.Venue.Address);
+                        builder.AppendLine(string.Format(CultureInfo.InvariantCulture, "https://www.bing.com/maps/?pc=W8AP&FORM=MAPXSH&where1=44.312783,9.33426&locsearch=1", venue.Venue.Location.Latitude, venue.Venue.Location.Longitude));
+                    }
+                    else if (message.Content is MessageContact contact)
+                    {
+                        builder.AppendLine($"[{Strings.Resources.AttachContact}]");
+                        builder.AppendLine(contact.Contact.GetFullName());
+                        builder.AppendLine(PhoneNumber.Format(contact.Contact.PhoneNumber));
+                    }
+                    else if (message.Content is MessagePoll poll)
+                    {
+                        builder.AppendLine($"[{Strings.Resources.Poll}: {poll.Poll.Question}");
+
+                        foreach (var option in poll.Poll.Options)
+                        {
+                            builder.AppendLine($"- {option.Text}");
+                        }
+                    }
+                    else if (message.Content is MessageText text)
+                    {
+                        builder.AppendLine(text.Text.Text);
+                    }
+
+                    if (message != messages.Last())
+                    {
+                        builder.AppendLine();
+                    }
+                }
+
+                var dataPackage = new DataPackage();
+                dataPackage.SetText(builder.ToString());
+                ClipboardEx.TrySetContent(dataPackage);
+            }
+        }
+
+        private bool MessagesCopyCanExecute()
+        {
+            return SelectedItems.Count > 0;
+        }
+
+        #endregion
+
+        #region Multiple Report
+
+        public RelayCommand MessagesReportCommand { get; }
+        private async void MessagesReportExecute()
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            var myId = CacheService.Options.MyId;
+            var messages = SelectedItems.Where(x => x.SenderUserId != myId).OrderBy(x => x.Id).Select(x => x.Id).ToList();
+            if (messages.Count < 1)
+            {
+                return;
+            }
+
+            var opt1 = new RadioButton { Content = Strings.Resources.ReportChatSpam, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt2 = new RadioButton { Content = Strings.Resources.ReportChatViolence, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt3 = new RadioButton { Content = Strings.Resources.ReportChatPornography, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt4 = new RadioButton { Content = Strings.Resources.ReportChatChild, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt5 = new RadioButton { Content = Strings.Resources.ReportChatOther, HorizontalAlignment = HorizontalAlignment.Stretch, IsChecked = true };
+            var stack = new StackPanel();
+            stack.Children.Add(opt1);
+            stack.Children.Add(opt2);
+            stack.Children.Add(opt3);
+            stack.Children.Add(opt4);
+            stack.Children.Add(opt5);
+            stack.Margin = new Thickness(12, 16, 12, 0);
+
+            var dialog = new TLContentDialog();
+            dialog.Content = stack;
+            dialog.Title = Strings.Resources.ReportChat;
+            dialog.IsPrimaryButtonEnabled = true;
+            dialog.IsSecondaryButtonEnabled = true;
+            dialog.PrimaryButtonText = Strings.Resources.OK;
+            dialog.SecondaryButtonText = Strings.Resources.Cancel;
+
+            var confirm = await dialog.ShowQueuedAsync();
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var reason = opt1.IsChecked == true
+                ? new ChatReportReasonSpam()
+                : (opt2.IsChecked == true
+                    ? new ChatReportReasonViolence()
+                    : (opt3.IsChecked == true
+                        ? new ChatReportReasonPornography()
+                        : (opt4.IsChecked == true
+                            ? new ChatReportReasonChildAbuse()
+                            : (ChatReportReason)new ChatReportReasonCustom())));
+
+            if (reason is ChatReportReasonCustom other)
+            {
+                var input = new InputDialog();
+                input.Title = Strings.Resources.ReportChat;
+                input.PlaceholderText = Strings.Resources.ReportChatDescription;
+                input.IsPrimaryButtonEnabled = true;
+                input.IsSecondaryButtonEnabled = true;
+                input.PrimaryButtonText = Strings.Resources.OK;
+                input.SecondaryButtonText = Strings.Resources.Cancel;
+
+                var inputResult = await input.ShowQueuedAsync();
+                if (inputResult == ContentDialogResult.Primary)
+                {
+                    other.Text = input.Text;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            ProtoService.Send(new ReportChat(chat.Id, reason, messages));
+        }
+
+        private bool MessagesReportCanExecute()
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return false;
+            }
+
+            var myId = CacheService.Options.MyId;
+            return chat.CanBeReported && SelectedItems.Count > 0 && SelectedItems.All(x => x.SenderUserId != myId);
         }
 
         #endregion
 
         #region Select
 
-        public RelayCommand<TLMessageBase> MessageSelectCommand { get; }
-        private void MessageSelectExecute(TLMessageBase message)
+        public RelayCommand<MessageViewModel> MessageSelectCommand { get; }
+        private void MessageSelectExecute(MessageViewModel message)
         {
-            Search = null;
+            DisposeSearch();
 
-            var messageCommon = message as TLMessageCommonBase;
-            if (messageCommon == null)
+            if (message.MediaAlbumId != 0 && _groupedMessages.TryGetValue(message.MediaAlbumId, out MessageViewModel group))
             {
-                return;
+                message = group;
             }
 
             SelectionMode = ListViewSelectionMode.Multiple;
+            ListField?.SelectedItems.Add(message);
 
-            SelectedItems = new List<TLMessageCommonBase> { messageCommon };
-            RaisePropertyChanged("SelectedItems");
+            ExpandSelection(new[] { message });
+        }
+
+        #endregion
+
+        #region Retry
+
+        public RelayCommand<MessageViewModel> MessageRetryCommand { get; }
+        private void MessageRetryExecute(MessageViewModel message)
+        {
+            ProtoService.Send(new ResendMessages(message.ChatId, new[] { message.Id }));
         }
 
         #endregion
 
         #region Copy
 
-        public RelayCommand<TLMessage> MessageCopyCommand { get; }
-        private void MessageCopyExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageCopyCommand { get; }
+        private async void MessageCopyExecute(MessageViewModel message)
         {
             if (message == null)
             {
                 return;
             }
 
-            string text = null;
-
-            var media = message.Media as ITLMessageMediaCaption;
-            if (media != null && !string.IsNullOrWhiteSpace(media.Caption))
+            var input = message.Content.GetCaption();
+            if (message.Content is MessageText text)
             {
-                text = media.Caption;
+                input = text.Text;
             }
-            else if (!string.IsNullOrWhiteSpace(message.Message))
+            else if (message.Content is MessageContact contact)
             {
-                text = message.Message;
+                input = new FormattedText(PhoneNumber.Format(contact.Contact.PhoneNumber), new TextEntity[0]);
             }
 
-            if (text != null)
+            if (input != null)
             {
                 var dataPackage = new DataPackage();
-                dataPackage.SetText(text);
+                dataPackage.SetText(input.Text);
+
+                if (input.Entities.Count > 0)
+                {
+                    var stream = new InMemoryRandomAccessStream();
+                    using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
+                    {
+                        writer.WriteInt32(input.Entities.Count(x => x.IsEditable()));
+
+                        foreach (var entity in input.Entities.Where(x => x.IsEditable()))
+                        {
+                            writer.WriteInt32(entity.Offset);
+                            writer.WriteInt32(entity.Length);
+
+                            switch (entity.Type)
+                            {
+                                case TextEntityTypeBold bold:
+                                    writer.WriteByte(1);
+                                    break;
+                                case TextEntityTypeItalic italic:
+                                    writer.WriteByte(2);
+                                    break;
+                                case TextEntityTypeCode code:
+                                case TextEntityTypePre pre:
+                                case TextEntityTypePreCode preCode:
+                                    writer.WriteByte(3);
+                                    break;
+                                case TextEntityTypeTextUrl textUrl:
+                                    writer.WriteByte(4);
+                                    writer.WriteInt32(textUrl.Url.Length);
+                                    writer.WriteString(textUrl.Url);
+                                    break;
+                                case TextEntityTypeMentionName mentionName:
+                                    writer.WriteByte(5);
+                                    writer.WriteInt32(mentionName.UserId);
+                                    break;
+                            }
+                        }
+
+                        await writer.FlushAsync();
+                        await writer.StoreAsync();
+                    }
+
+                    stream.Seek(0);
+                    dataPackage.SetData("application/x-tl-field-tags", stream.CloneStream());
+                }
+
                 ClipboardEx.TrySetContent(dataPackage);
             }
         }
@@ -537,26 +644,29 @@ namespace Unigram.ViewModels
 
         #region Copy media
 
-        public RelayCommand<TLMessage> MessageCopyMediaCommand { get; }
-        private async void MessageCopyMediaExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageCopyMediaCommand { get; }
+        private async void MessageCopyMediaExecute(MessageViewModel message)
         {
             var photo = message.GetPhoto();
-            var photoSize = photo?.Full as TLPhotoSize;
-            if (photoSize == null)
+            if (photo == null)
             {
                 return;
             }
 
-            var location = photoSize.Location;
-            var fileName = string.Format("{0}_{1}_{2}.jpg", location.VolumeId, location.LocalId, location.Secret);
-            if (File.Exists(FileUtils.GetTempFileName(fileName)))
+            var big = photo.GetBig();
+            if (big == null)
             {
-                var result = await FileUtils.GetTempFileAsync(fileName);
+                return;
+            }
 
+            if (big.Photo.Local.IsDownloadingCompleted)
+            {
                 try
                 {
+                    var temp = await StorageFile.GetFileFromPathAsync(big.Photo.Local.Path);
+
                     var dataPackage = new DataPackage();
-                    dataPackage.SetStorageItems(new[] { result });
+                    dataPackage.SetBitmap(RandomAccessStreamReference.CreateFromFile(temp));
                     ClipboardEx.TrySetContent(dataPackage);
                 }
                 catch { }
@@ -567,34 +677,43 @@ namespace Unigram.ViewModels
 
         #region Copy link
 
-        public RelayCommand<TLMessageCommonBase> MessageCopyLinkCommand { get; }
-        private void MessageCopyLinkExecute(TLMessageCommonBase messageCommon)
+        public RelayCommand<MessageViewModel> MessageCopyLinkCommand { get; }
+        private async void MessageCopyLinkExecute(MessageViewModel message)
         {
-            if (messageCommon == null)
+            if (message == null)
             {
                 return;
             }
 
-            var channel = With as TLChannel;
-            if (channel == null)
+            var chat = message.GetChat();
+            if (chat == null)
             {
                 return;
             }
 
-            var link = $"{channel.Username}/{messageCommon.Id}";
-
-            if (messageCommon is TLMessage message && message.IsRoundVideo())
+            var supergroup = CacheService.GetSupergroup(chat);
+            if (supergroup != null && string.IsNullOrEmpty(supergroup.Username))
             {
-                link = $"https://telesco.pe/{link}";
+                var response = await ProtoService.SendAsync(new GetMessageLink(chat.Id, message.Id));
+                if (response is HttpUrl link)
+                {
+                    var dataPackage = new DataPackage();
+                    dataPackage.SetText(link.Url);
+                    ClipboardEx.TrySetContent(dataPackage);
+
+                    await TLMessageDialog.ShowAsync(Strings.Resources.LinkCopiedPrivate, Strings.Resources.AppName, Strings.Resources.OK);
+                }
             }
             else
             {
-                link = UsernameToLinkConverter.Convert(link);
+                var response = await ProtoService.SendAsync(new GetPublicMessageLink(chat.Id, message.Id, false));
+                if (response is PublicMessageLink link)
+                {
+                    var dataPackage = new DataPackage();
+                    dataPackage.SetText(link.Link);
+                    ClipboardEx.TrySetContent(dataPackage);
+                }
             }
-
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(link);
-            ClipboardEx.TrySetContent(dataPackage);
         }
 
         #endregion
@@ -602,561 +721,488 @@ namespace Unigram.ViewModels
         #region Edit
 
         public RelayCommand MessageEditLastCommand { get; }
-        private void MessageEditLastExecute()
+        private async void MessageEditLastExecute()
         {
-            var last = Items.LastOrDefault(x => x is TLMessage message && message.IsOut);
+            var last = Items.LastOrDefault(x => x.CanBeEdited);
             if (last != null)
             {
                 MessageEditCommand.Execute(last);
+                await ListField?.ScrollToItem(last, VerticalAlignment.Center, true);
             }
         }
 
-        public RelayCommand<TLMessage> MessageEditCommand { get; }
-        private async void MessageEditExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageEditCommand { get; }
+        private void MessageEditExecute(MessageViewModel message)
         {
-            Search = null;
-
-            if (message == null)
-            {
-                return;
-            }
-
-            var response = await ProtoService.GetMessageEditDataAsync(Peer, message.Id);
-            if (response.IsSucceeded)
-            {
-                BeginOnUIThread(() =>
-                {
-                    var messageEditText = GetMessageEditText(response.Result, message);
-                    StartEditMessage(messageEditText, message);
-                });
-            }
-            else
-            {
-                BeginOnUIThread(() =>
-                {
-                    //this.IsWorking = false;
-                    //if (error.CodeEquals(ErrorCode.BAD_REQUEST) && error.TypeEquals(ErrorType.MESSAGE_ID_INVALID))
-                    //{
-                    //    MessageBox.Show(AppResources.EditMessageError, AppResources.Error, 0);
-                    //    return;
-                    //}
-                    Execute.ShowDebugMessage("messages.getMessageEditData error " + response.Error);
-                });
-            }
-        }
-
-        public void StartEditMessage(string text, TLMessage message)
-        {
-            if (text == null)
-            {
-                return;
-            }
-            if (message == null)
-            {
-                return;
-            }
-
-            var config = CacheService.GetConfig();
-            var editUntil = (config != null) ? (message.Date + config.EditTimeLimit + 300) : 0;
-            if (message.FromId != null && message.ToId is TLPeerUser && message.FromId.Value == message.ToId.Id)
-            {
-                editUntil = 0;
-            }
-
-            Reply = new TLMessagesContainter
-            {
-                EditMessage = message,
-                EditUntil = editUntil,
-                // TODO: setup original content
-                PreviousMessage = new TLMessage
-                {
-                    ToId = message.ToId,
-                    FromId = message.FromId,
-                    IsOut = message.IsOut
-                }
-            };
-
-            SetText(text, message.Entities, true);
-
-            //if (this._editMessageTimer == null)
-            //{
-            //    this._editMessageTimer = new DispatcherTimer();
-            //    this._editMessageTimer.add_Tick(new EventHandler(this.OnEditMessageTimerTick));
-            //    this._editMessageTimer.set_Interval(System.TimeSpan.FromSeconds(1.0));
-            //}
-            //this._editMessageTimer.Start();
-            //this.IsEditingEnabled = true;
-            //this.Text = text.ToString();
-
             CurrentInlineBot = null;
+            DisposeSearch();
+            SaveDraft();
 
-            //this.ClearStickerHints();
-            //this.ClearInlineBotResults();
-            //this.ClearUsernameHints();
-            //this.ClearHashtagHints();
-            //this.ClearCommandHints();
-        }
+            var container = new MessageComposerHeader { EditingMessage = message };
+            var input = message.Content.GetCaption();
 
-        private string GetMessageEditText(TLMessagesMessageEditData editData, TLMessage message)
-        {
-            if (editData.IsCaption)
+            if (message.Content is MessageText text)
             {
-                var mediaCaption = message.Media as ITLMessageMediaCaption;
-                if (mediaCaption != null)
-                {
-                    return mediaCaption.Caption ?? string.Empty;
-                }
-            }
-            else
-            {
-                return message.Message;
+                input = text.Text;
+                container.WebPagePreview = text.WebPage;
+                container.WebPageUrl = text.WebPage?.Url;
             }
 
-            return null;
+            ComposerHeader = container;
+            SetText(input);
 
-            //if (!editData.IsCaption)
+            //if (message?.Media is TLMessageMediaGroup groupMedia)
             //{
-            //    var text = message.Message.ToString();
-            //    var stringBuilder = new StringBuilder();
-
-            //    if (message != null && message.Entities != null && message.Entities.Count > 0)
-            //    {
-            //        //this.ClearMentions();
-
-            //        if (message.Entities.FirstOrDefault(x => !(x is TLMessageEntityMentionName) && !(x is TLInputMessageEntityMentionName)) == null)
-            //        {
-            //            for (int i = 0; i < message.Entities.Count; i++)
-            //            {
-            //                int num = (i == 0) ? 0 : (message.Entities[i - 1].Offset + message.Entities[i - 1].Length);
-            //                int num2 = (i == 0) ? message.Entities[i].Offset : (message.Entities[i].Offset - num);
-
-            //                stringBuilder.Append(text.Substring(num, num2));
-
-            //                var entityMentionName = message.Entities[i] as TLMessageEntityMentionName;
-            //                if (entityMentionName != null)
-            //                {
-            //                    var user = CacheService.GetUser(entityMentionName.UserId);
-            //                    if (user != null)
-            //                    {
-            //                        //this.AddMention(user);
-            //                        string text2 = text.Substring(message.Entities[i].Offset, message.Entities[i].Length);
-            //                        stringBuilder.Append(string.Format("@({0})", text2));
-            //                    }
-            //                }
-            //                else
-            //                {
-            //                    var entityInputMentionName = message.Entities[i] as TLInputMessageEntityMentionName;
-            //                    if (entityInputMentionName != null)
-            //                    {
-            //                        var inputUser = entityInputMentionName.UserId as TLInputUser;
-            //                        if (inputUser != null)
-            //                        {
-            //                            TLUserBase user2 = this.CacheService.GetUser(inputUser.UserId);
-            //                            if (user2 != null)
-            //                            {
-            //                                //this.AddMention(user2);
-            //                                string text3 = text.Substring(message.Entities[i].Offset, message.Entities[i].Length);
-            //                                stringBuilder.Append(string.Format("@({0})", text3));
-            //                            }
-            //                        }
-            //                    }
-            //                    else
-            //                    {
-            //                        num = message.Entities[i].Offset;
-            //                        num2 = message.Entities[i].Length;
-            //                        stringBuilder.Append(text.Substring(num, num2));
-            //                    }
-            //                }
-            //            }
-
-            //            var baseEntity = message.Entities[message.Entities.Count - 1];
-            //            if (baseEntity != null)
-            //            {
-            //                stringBuilder.Append(text.Substring(baseEntity.Offset + baseEntity.Length));
-            //            }
-            //        }
-            //        else
-            //        {
-            //            stringBuilder.Append(text);
-            //        }
-            //    }
-            //    else
-            //    {
-            //        stringBuilder.Append(text);
-            //    }
-
-            //    return stringBuilder.ToString();
+            //    message = groupMedia.Layout.Messages.FirstOrDefault();
             //}
 
-            //var mediaCaption = message.Media as ITLMediaCaption;
-            //if (mediaCaption != null)
+            //if (message == null)
             //{
-            //    return mediaCaption.Caption;
+            //    return;
             //}
 
-            //return null;
+            //var response = await LegacyService.GetMessageEditDataAsync(Peer, message.Id);
+            //if (response.IsSucceeded)
+            //{
+            //    BeginOnUIThread(() =>
+            //    {
+            //        var messageEditText = GetMessageEditText(response.Result, message);
+            //        StartEditMessage(messageEditText, message);
+            //    });
+            //}
+            //else
+            //{
+            //    BeginOnUIThread(() =>
+            //    {
+            //        //this.IsWorking = false;
+            //        //if (error.CodeEquals(ErrorCode.BAD_REQUEST) && error.TypeEquals(ErrorType.MESSAGE_ID_INVALID))
+            //        //{
+            //        //    MessageBox.Show(Strings.Additional.EditMessageError, Strings.Additional.Error, 0);
+            //        //    return;
+            //        //}
+            //        Logs.Log.Write("messages.getMessageEditData error " + response.Error);
+            //    });
+            //}
         }
 
         #endregion
 
         #region Pin
 
-        public RelayCommand<TLMessageBase> MessagePinCommand { get; }
-        private async void MessagePinExecute(TLMessageBase message)
+        public RelayCommand<MessageViewModel> MessagePinCommand { get; }
+        private async void MessagePinExecute(MessageViewModel message)
         {
-            if (PinnedMessage?.Id == message.Id)
+            var chat = message.GetChat();
+
+            if (chat.PinnedMessageId == message.Id)
             {
-                var dialog = new TLMessageDialog();
-                dialog.Title = "Unpin message";
-                dialog.Message = "Would you like to unpin this message?";
-                dialog.PrimaryButtonText = "Yes";
-                dialog.SecondaryButtonText = "No";
-
-                var dialogResult = await dialog.ShowQueuedAsync();
-                if (dialogResult == ContentDialogResult.Primary)
+                var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.UnpinMessageAlert, Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
+                if (confirm == ContentDialogResult.Primary)
                 {
-                    var channel = Peer as TLInputPeerChannel;
-                    var inputChannel = new TLInputChannel { ChannelId = channel.ChannelId, AccessHash = channel.AccessHash };
-
-                    var result = await ProtoService.UpdatePinnedMessageAsync(false, inputChannel, 0);
-                    if (result.IsSucceeded)
-                    {
-                        PinnedMessage = null;
-                    }
+                    ProtoService.Send(new UnpinChatMessage(chat.Id));
                 }
             }
             else
             {
                 var dialog = new TLMessageDialog();
-                dialog.Title = "Pin message";
-                dialog.Message = "Would you like to pin this message?";
-                dialog.CheckBoxLabel = "Notify all members";
-                dialog.IsChecked = true;
-                dialog.PrimaryButtonText = "Yes";
-                dialog.SecondaryButtonText = "No";
+                dialog.Title = Strings.Resources.AppName;
+                dialog.Message = chat.Type is ChatTypeSupergroup supergroup && supergroup.IsChannel
+                    ? Strings.Resources.PinMessageAlertChannel
+                    : chat.Type is ChatTypePrivate privata && privata.UserId == CacheService.Options.MyId
+                    ? Strings.Resources.PinMessageAlertChat
+                    : Strings.Resources.PinMessageAlert;
+                dialog.PrimaryButtonText = Strings.Resources.OK;
+                dialog.SecondaryButtonText = Strings.Resources.Cancel;
 
-                var dialogResult = await dialog.ShowQueuedAsync();
-                if (dialogResult == ContentDialogResult.Primary)
+                if (chat.Type is ChatTypeBasicGroup || chat.Type is ChatTypeSupergroup super && !super.IsChannel)
                 {
-                    var channel = Peer as TLInputPeerChannel;
-                    var inputChannel = new TLInputChannel { ChannelId = channel.ChannelId, AccessHash = channel.AccessHash };
+                    dialog.CheckBoxLabel = Strings.Resources.PinNotify;
+                    dialog.IsChecked = true;
+                }
 
-                    var silent = dialog.IsChecked == false;
-                    var result = await ProtoService.UpdatePinnedMessageAsync(silent, inputChannel, message.Id);
-                    if (result.IsSucceeded)
-                    {
-                        var updates = result.Result as TLUpdates;
-                        if (updates != null)
-                        {
-                            var newChannelMessageUpdate = updates.Updates.OfType<TLUpdateNewChannelMessage>().FirstOrDefault();
-                            if (newChannelMessageUpdate != null)
-                            {
-                                Handle(newChannelMessageUpdate.Message as TLMessageCommonBase);
-                                Aggregator.Publish(new TopMessageUpdatedEventArgs(_dialog, newChannelMessageUpdate.Message));
-                            }
-                        }
-
-                        PinnedMessage = message;
-                    }
+                var confirm = await dialog.ShowQueuedAsync();
+                if (confirm == ContentDialogResult.Primary)
+                {
+                    ProtoService.Send(new PinChatMessage(chat.Id, message.Id, dialog.IsChecked == false));
                 }
             }
+        }
+
+        #endregion
+
+        #region Report
+
+        public RelayCommand<MessageViewModel> MessageReportCommand { get; }
+        private async void MessageReportExecute(MessageViewModel message)
+        {
+            var chat = _chat;
+            if (chat == null)
+            {
+                return;
+            }
+
+            var opt1 = new RadioButton { Content = Strings.Resources.ReportChatSpam, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt2 = new RadioButton { Content = Strings.Resources.ReportChatViolence, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt3 = new RadioButton { Content = Strings.Resources.ReportChatPornography, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt4 = new RadioButton { Content = Strings.Resources.ReportChatChild, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var opt5 = new RadioButton { Content = Strings.Resources.ReportChatOther, HorizontalAlignment = HorizontalAlignment.Stretch, IsChecked = true };
+            var stack = new StackPanel();
+            stack.Children.Add(opt1);
+            stack.Children.Add(opt2);
+            stack.Children.Add(opt3);
+            stack.Children.Add(opt4);
+            stack.Children.Add(opt5);
+            stack.Margin = new Thickness(12, 16, 12, 0);
+
+            var dialog = new TLContentDialog();
+            dialog.Content = stack;
+            dialog.Title = Strings.Resources.ReportChat;
+            dialog.IsPrimaryButtonEnabled = true;
+            dialog.IsSecondaryButtonEnabled = true;
+            dialog.PrimaryButtonText = Strings.Resources.OK;
+            dialog.SecondaryButtonText = Strings.Resources.Cancel;
+
+            var confirm = await dialog.ShowQueuedAsync();
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var reason = opt1.IsChecked == true
+                ? new ChatReportReasonSpam()
+                : (opt2.IsChecked == true
+                    ? new ChatReportReasonViolence()
+                    : (opt3.IsChecked == true
+                        ? new ChatReportReasonPornography()
+                        : (opt4.IsChecked == true
+                            ? new ChatReportReasonChildAbuse()
+                            : (ChatReportReason)new ChatReportReasonCustom())));
+
+            if (reason is ChatReportReasonCustom other)
+            {
+                var input = new InputDialog();
+                input.Title = Strings.Resources.ReportChat;
+                input.PlaceholderText = Strings.Resources.ReportChatDescription;
+                input.IsPrimaryButtonEnabled = true;
+                input.IsSecondaryButtonEnabled = true;
+                input.PrimaryButtonText = Strings.Resources.OK;
+                input.SecondaryButtonText = Strings.Resources.Cancel;
+
+                var inputResult = await input.ShowQueuedAsync();
+                if (inputResult == ContentDialogResult.Primary)
+                {
+                    other.Text = input.Text;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            ProtoService.Send(new ReportChat(chat.Id, reason, new[] { message.Id }));
+        }
+
+        #endregion
+
+        #region Send now
+
+        public RelayCommand<MessageViewModel> MessageSendNowCommand { get; }
+        private void MessageSendNowExecute(MessageViewModel message)
+        {
+            ProtoService.Send(new EditMessageSchedulingState(message.ChatId, message.Id, null));
+        }
+
+        #endregion
+
+        #region Reschedule
+
+        public RelayCommand<MessageViewModel> MessageRescheduleCommand { get; }
+        private async void MessageRescheduleExecute(MessageViewModel message)
+        {
+            var options = await PickSendMessageOptionsAsync(true);
+            if (options?.SchedulingState == null)
+            {
+                return;
+            }
+
+            ProtoService.Send(new EditMessageSchedulingState(message.ChatId, message.Id, options.SchedulingState)); 
         }
 
         #endregion
 
         #region Keyboard button
 
-        private TLMessage _replyMarkupMessage;
-        private TLReplyMarkupBase _replyMarkup;
-
-        public TLMessage EditedMessage
+        public async void KeyboardButtonExecute(MessageViewModel message, object button)
         {
-            get
+            if (button is InlineKeyboardButton inline)
             {
-                if (Reply is TLMessagesContainter container)
+                if (message.SchedulingState != null)
                 {
-                    return container.EditMessage;
+                    await TLMessageDialog.ShowAsync(Strings.Resources.MessageScheduledBotAction, Strings.Resources.AppName, Strings.Resources.OK);
+                    return;
                 }
 
-                return null;
-            }
-        }
-
-        public TLReplyMarkupBase ReplyMarkup
-        {
-            get
-            {
-                return _replyMarkup;
-            }
-            set
-            {
-                Set(ref _replyMarkup, value);
-            }
-        }
-
-        private void SetReplyMarkup(TLMessage message)
-        {
-            if (Reply != null && message != null)
-            {
-                return;
-            }
-
-            if (message != null && message.ReplyMarkup != null)
-            {
-                if (message.ReplyMarkup is TLReplyInlineMarkup)
+                var chat = message.GetChat();
+                if (chat == null)
                 {
                     return;
                 }
 
-                //var keyboardMarkup = message.ReplyMarkup as TLReplyKeyboardMarkup;
-                //if (keyboardMarkup != null && keyboardMarkup.IsPersonal && !message.IsMention)
-                //{
-                //    return;
-                //}
-
-                var keyboardHide = message.ReplyMarkup as TLReplyKeyboardHide;
-                if (keyboardHide != null && _replyMarkupMessage != null && _replyMarkupMessage.FromId.Value != message.FromId.Value)
+                if (inline.Type is InlineKeyboardButtonTypeBuy buy)
                 {
-                    return;
-                }
-
-                var keyboardForceReply = message.ReplyMarkup as TLReplyKeyboardForceReply;
-                if (keyboardForceReply != null /*&& !keyboardForceReply.HasResponse*/)
-                {
-                    _replyMarkupMessage = null;
-                    ReplyMarkup = null;
-                    Reply = message;
-                    return;
-                }
-
-            }
-
-            if (_replyMarkupMessage != null && _replyMarkupMessage.Id > message.Id)
-            {
-                return;
-            }
-
-            //this.SuppressOpenCommandsKeyboard = (message != null && message.ReplyMarkup != null && suppressOpenKeyboard);
-
-            _replyMarkupMessage = message;
-            ReplyMarkup = message.ReplyMarkup;
-        }
-
-        //public RelayCommand<TLKeyboardButtonBase> KeyboardButtonCommand { get; }
-        public async void KeyboardButtonExecute(TLKeyboardButtonBase button, TLMessage message)
-        {
-            if (button is TLKeyboardButtonBuy buyButton)
-            {
-                if (message.Media is TLMessageMediaInvoice invoiceMedia && invoiceMedia.HasReceiptMsgId)
-                {
-                    var response = await ProtoService.GetPaymentReceiptAsync(invoiceMedia.ReceiptMsgId.Value);
-                    if (response.IsSucceeded)
+                    if (message.Content is MessageInvoice invoice && invoice.ReceiptMessageId != 0)
                     {
-                        NavigationService.Navigate(typeof(PaymentReceiptPage), TLTuple.Create(message, response.Result));
+                        //var response = await ProtoService.SendAsync(new GetPaymentReceipt(chat.Id, invoice.ReceiptMessageId));
+                        //if (response is PaymentReceipt receipt)
+                        //{
+                        //    NavigationService.Navigate(typeof(PaymentReceiptPage), TLTuple.Create(message, receipt));
+                        //}
+
+                        NavigationService.Navigate(typeof(PaymentReceiptPage), new ReceiptNavigation(chat.Id, invoice.ReceiptMessageId));
                     }
-                }
-                else
-                {
-                    var response = await ProtoService.GetPaymentFormAsync(message.Id);
-                    if (response.IsSucceeded)
+                    else
                     {
-                        if (response.Result.Invoice.IsEmailRequested || response.Result.Invoice.IsNameRequested || response.Result.Invoice.IsPhoneRequested || response.Result.Invoice.IsShippingAddressRequested)
-                        {
-                            NavigationService.NavigateToPaymentFormStep1(message, response.Result);
-                        }
-                        else if (response.Result.HasSavedCredentials)
-                        {
-                            if (ApplicationSettings.Current.TmpPassword != null)
-                            {
-                                if (ApplicationSettings.Current.TmpPassword.ValidUntil < TLUtils.Now + 60)
-                                {
-                                    ApplicationSettings.Current.TmpPassword = null;
-                                }
-                            }
+                        // TODO:
+                        await TLMessageDialog.ShowAsync("Payments are coming soon!", Strings.Resources.AppName, "OK");
+                        return;
 
-                            if (ApplicationSettings.Current.TmpPassword != null)
+                        var response = await ProtoService.SendAsync(new GetPaymentForm(chat.Id, message.Id));
+                        if (response is PaymentForm form)
+                        {
+                            if (form.Invoice.NeedEmailAddress || form.Invoice.NeedName || form.Invoice.NeedPhoneNumber || form.Invoice.NeedShippingAddress)
                             {
-                                NavigationService.NavigateToPaymentFormStep5(message, response.Result, null, null, null, null, null, true);
+                                NavigationService.NavigateToPaymentFormStep1(message, form);
+                            }
+                            else if (form.SavedCredentials != null)
+                            {
+                                //if (ApplicationSettings.Current.TmpPassword != null)
+                                //{
+                                //    if (ApplicationSettings.Current.TmpPassword.ValidUntil < TLUtils.Now + 60)
+                                //    {
+                                //        ApplicationSettings.Current.TmpPassword = null;
+                                //    }
+                                //}
+
+                                //if (ApplicationSettings.Current.TmpPassword != null)
+                                //{
+                                //    NavigationService.NavigateToPaymentFormStep5(message, form, null, null, null, null, null, true);
+                                //}
+                                //else
+                                //{
+                                //    NavigationService.NavigateToPaymentFormStep4(message, form, null, null, null);
+                                //}
                             }
                             else
                             {
-                                NavigationService.NavigateToPaymentFormStep4(message, response.Result, null, null, null);
+                                NavigationService.NavigateToPaymentFormStep3(message, form, null, null, null);
                             }
                         }
-                        else
-                        {
-                            NavigationService.NavigateToPaymentFormStep3(message, response.Result, null, null, null);
-                        }
                     }
                 }
-            }
-            else if (button is TLKeyboardButtonSwitchInline switchInlineButton)
-            {
-                var bot = GetBot(message);
-                if (bot != null)
+                else if (inline.Type is InlineKeyboardButtonTypeLoginUrl loginUrl)
                 {
-                    if (switchInlineButton.IsSamePeer)
+                    var response = await ProtoService.SendAsync(new GetLoginUrlInfo(chat.Id, message.Id, loginUrl.Id));
+                    if (response is LoginUrlInfoOpen infoOpen)
                     {
-                        SetText(string.Format("@{0} {1}", bot.Username, switchInlineButton.Query), focus: true);
-                        ResolveInlineBot(bot.Username, switchInlineButton.Query);
-
-                        if (With is TLChatBase)
-                        {
-                            Reply = message;
-                        }
+                        OpenUrl(infoOpen.Url, !infoOpen.SkipConfirm);
                     }
-                    else
+                    else if (response is LoginUrlInfoRequestConfirmation requestConfirmation)
                     {
-                        await ForwardView.Current.ShowAsync(switchInlineButton, bot);
-                    }
-                }
-            }
-            else if (button is TLKeyboardButtonUrl urlButton)
-            {
-                var url = urlButton.Url;
-                if (url.StartsWith("http") == false)
-                {
-                    url = "http://" + url;
-                }
-
-                if (Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
-                {
-                    if (MessageHelper.IsTelegramUrl(uri))
-                    {
-                        MessageHelper.HandleTelegramUrl(urlButton.Url);
-                    }
-                    else
-                    {
-                        var dialog = new TLMessageDialog(urlButton.Url, "Open this link?");
-                        dialog.PrimaryButtonText = "OK";
-                        dialog.SecondaryButtonText = "Cancel";
-
-                        var result = await dialog.ShowQueuedAsync();
-                        if (result != ContentDialogResult.Primary)
+                        var dialog = new LoginUrlInfoView(CacheService, requestConfirmation);
+                        var confirm = await dialog.ShowQueuedAsync();
+                        if (confirm != ContentDialogResult.Primary || !dialog.HasAccepted)
                         {
                             return;
                         }
 
-                        await Launcher.LaunchUriAsync(uri);
-                    }
-                }
-            }
-            else if (button is TLKeyboardButtonCallback callbackButton)
-            {
-                var response = await ProtoService.GetBotCallbackAnswerAsync(Peer, message.Id, callbackButton.Data, false);
-                if (response.IsSucceeded)
-                {
-                    if (response.Result.HasMessage)
-                    {
-                        if (response.Result.IsAlert)
+                        response = await ProtoService.SendAsync(new GetLoginUrl(chat.Id, message.Id, loginUrl.Id, dialog.HasWriteAccess));
+                        if (response is HttpUrl httpUrl)
                         {
-                            await new TLMessageDialog(response.Result.Message).ShowQueuedAsync();
-                        }
-                        else
-                        {
-                            var date = TLUtils.DateToUniversalTimeTLInt(ProtoService.ClientTicksDelta, DateTime.Now);
-
-                            var bot = GetBot(message);
-                            if (bot == null)
+                            if (MessageHelper.TryCreateUri(httpUrl.Url, out Uri uri))
                             {
-                                // TODO:
-                                await new TLMessageDialog(response.Result.Message).ShowQueuedAsync();
-                                return;
+                                await Launcher.LaunchUriAsync(uri);
                             }
-
-                            InformativeMessage = TLUtils.GetShortMessage(0, bot.Id, Peer.ToPeer(), date, response.Result.Message);
                         }
-                    }
-                    else if (response.Result.HasUrl && response.Result.IsHasUrl /* ??? */)
-                    {
-                        var url = response.Result.Url;
-                        if (url.StartsWith("http") == false)
+                        else if (response is Error)
                         {
-                            url = "http://" + url;
-                        }
-
-                        if (Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
-                        {
-                            if (MessageHelper.IsTelegramUrl(uri))
+                            if (MessageHelper.TryCreateUri(loginUrl.Url, out Uri uri))
                             {
-                                MessageHelper.HandleTelegramUrl(response.Result.Url);
-                            }
-                            else
-                            {
-                                //var dialog = new TLMessageDialog(response.Result.Url, "Open this link?");
-                                //dialog.PrimaryButtonText = "OK";
-                                //dialog.SecondaryButtonText = "Cancel";
-
-                                //var result = await dialog.ShowQueuedAsync();
-                                //if (result != ContentDialogResult.Primary)
-                                //{
-                                //    return;
-                                //}
-
                                 await Launcher.LaunchUriAsync(uri);
                             }
                         }
                     }
                 }
-            }
-            else if (button is TLKeyboardButtonGame gameButton)
-            {
-                var gameMedia = message.Media as TLMessageMediaGame;
-                if (gameMedia != null)
+                else if (inline.Type is InlineKeyboardButtonTypeSwitchInline switchInline)
                 {
-                    var response = await ProtoService.GetBotCallbackAnswerAsync(Peer, message.Id, null, true);
-                    if (response.IsSucceeded && response.Result.IsHasUrl && response.Result.HasUrl)
+                    var bot = GetBot(message);
+                    if (bot == null)
                     {
-                        if (CacheService.GetUser(message.ViaBotId) is TLUser user)
+                        return;
+                    }
+
+                    if (switchInline.InCurrentChat)
+                    {
+                        SetText(string.Format("@{0} {1}", bot.Username, switchInline.Query), focus: true);
+                        ResolveInlineBot(bot.Username, switchInline.Query);
+                    }
+                    else
+                    {
+                        await ShareView.GetForCurrentView().ShowAsync(switchInline, bot);
+                    }
+                }
+                else if (inline.Type is InlineKeyboardButtonTypeUrl urlButton)
+                {
+                    if (MessageHelper.TryCreateUri(urlButton.Url, out Uri uri))
+                    {
+                        if (MessageHelper.IsTelegramUrl(uri))
                         {
-                            NavigationService.Navigate(typeof(GamePage), new TLTuple<string, string, string, TLMessage>(gameMedia.Game.Title, user.Username, response.Result.Url, message));
+                            MessageHelper.OpenTelegramUrl(ProtoService, NavigationService, uri);
                         }
                         else
                         {
-                            NavigationService.Navigate(typeof(GamePage), new TLTuple<string, string, string, TLMessage>(gameMedia.Game.Title, string.Empty, response.Result.Url, message));
+                            var confirm = await TLMessageDialog.ShowAsync(string.Format(Strings.Resources.OpenUrlAlert, urlButton.Url), Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
+                            if (confirm != ContentDialogResult.Primary)
+                            {
+                                return;
+                            }
+
+                            await Launcher.LaunchUriAsync(uri);
                         }
                     }
                 }
-            }
-            else if (button is TLKeyboardButtonRequestPhone requestPhoneButton)
-            {
-                if (CacheService.GetUser(SettingsHelper.UserId) is TLUser cached)
+                else if (inline.Type is InlineKeyboardButtonTypeCallback callback)
                 {
-                    var confirm = await TLMessageDialog.ShowAsync("The bot will know your phone number. This can be useful for integration with other services.", "Share your phone number?", "OK", "Cancel");
+                    var bot = GetBot(message);
+                    if (bot != null)
+                    {
+                        InformativeMessage = _messageFactory.Create(this, new Message(0, bot.Id, 0, null, null, false, false, false, true, false, false, false, 0, 0, null, 0, 0, 0, 0, string.Empty, 0, 0, string.Empty, new MessageText(new FormattedText(Strings.Resources.Loading, new TextEntity[0]), null), null));
+                    }
+
+                    var response = await ProtoService.SendAsync(new GetCallbackQueryAnswer(chat.Id, message.Id, new CallbackQueryPayloadData(callback.Data)));
+                    if (response is CallbackQueryAnswer answer)
+                    {
+                        if (!string.IsNullOrEmpty(answer.Text))
+                        {
+                            if (answer.ShowAlert)
+                            {
+                                await new TLMessageDialog(answer.Text).ShowQueuedAsync();
+                            }
+                            else
+                            {
+                                if (bot == null)
+                                {
+                                    // TODO:
+                                    await new TLMessageDialog(answer.Text).ShowQueuedAsync();
+                                    return;
+                                }
+
+                                InformativeMessage = _messageFactory.Create(this, new Message(0, bot.Id, 0, null, null, false, false, false, true, false, false, false, 0, 0, null, 0, 0, 0, 0, string.Empty, 0, 0, string.Empty, new MessageText(new FormattedText(answer.Text, new TextEntity[0]), null), null));
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(answer.Url))
+                        {
+                            if (MessageHelper.TryCreateUri(answer.Url, out Uri uri))
+                            {
+                                if (MessageHelper.IsTelegramUrl(uri))
+                                {
+                                    MessageHelper.OpenTelegramUrl(ProtoService, NavigationService, uri);
+                                }
+                                else
+                                {
+                                    //var dialog = new TLMessageDialog(response.Result.Url, "Open this link?");
+                                    //dialog.PrimaryButtonText = "OK";
+                                    //dialog.SecondaryButtonText = "Cancel";
+
+                                    //var result = await dialog.ShowQueuedAsync();
+                                    //if (result != ContentDialogResult.Primary)
+                                    //{
+                                    //    return;
+                                    //}
+
+                                    await Launcher.LaunchUriAsync(uri);
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (inline.Type is InlineKeyboardButtonTypeCallbackGame callbackGame)
+                {
+                    var game = message.Content as MessageGame;
+                    if (game == null)
+                    {
+                        return;
+                    }
+
+                    var response = await ProtoService.SendAsync(new GetCallbackQueryAnswer(chat.Id, message.Id, new CallbackQueryPayloadGame(game.Game.ShortName)));
+                    if (response is CallbackQueryAnswer answer && !string.IsNullOrEmpty(answer.Url))
+                    {
+                        var bundle = new TdBundle();
+                        bundle.Add("title", game.Game.Title);
+                        bundle.Add("url", answer.Url);
+                        bundle.Add("message", message.Id);
+                        bundle.Add("chat", message.ChatId);
+
+                        var viaBot = message.GetViaBotUser();
+                        if (viaBot != null)
+                        {
+                            bundle.Add("username", viaBot.Username);
+                        }
+
+                        ChatActionManager.SetTyping(new ChatActionStartPlayingGame());
+                        NavigationService.Navigate(typeof(GamePage), bundle);
+                    }
+                }
+            }
+            else if (button is KeyboardButton keyboardButton)
+            {
+                if (keyboardButton.Type is KeyboardButtonTypeRequestPhoneNumber requestPhoneNumber)
+                {
+                    var response = await ProtoService.SendAsync(new GetMe());
+                    if (response is Telegram.Td.Api.User cached)
+                    {
+                        var chat = Chat;
+                        if (chat == null)
+                        {
+                            return;
+                        }
+
+                        var content = Strings.Resources.AreYouSureShareMyContactInfo;
+                        if (chat.Type is ChatTypePrivate privata)
+                        {
+                            var withUser = ProtoService.GetUser(privata.UserId);
+                            if (withUser != null)
+                            {
+                                content = withUser.Type is UserTypeBot ? Strings.Resources.AreYouSureShareMyContactInfoBot : string.Format(Strings.Resources.AreYouSureShareMyContactInfoUser, PhoneNumber.Format(cached.PhoneNumber), withUser.GetFullName());
+                            }
+                        }
+
+                        var confirm = await TLMessageDialog.ShowAsync(content, Strings.Resources.ShareYouPhoneNumberTitle, Strings.Resources.OK, Strings.Resources.Cancel);
+                        if (confirm == ContentDialogResult.Primary)
+                        {
+                            await SendContactAsync(new Contact(cached.PhoneNumber, cached.FirstName, cached.LastName, string.Empty, cached.Id), null);
+                        }
+                    }
+                }
+                else if (keyboardButton.Type is KeyboardButtonTypeRequestLocation requestLocation)
+                {
+                    var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.ShareYouLocationInfo, Strings.Resources.ShareYouLocationTitle, Strings.Resources.OK, Strings.Resources.Cancel);
                     if (confirm == ContentDialogResult.Primary)
                     {
-                        await SendContactAsync(cached);
+                        var location = await _locationService.GetPositionAsync();
+                        if (location != null)
+                        {
+                            await SendMessageAsync(0, new InputMessageLocation(location, 0), null);
+                        }
                     }
                 }
-            }
-            else if (button is TLKeyboardButtonRequestGeoLocation requestGeoButton)
-            {
-                var confirm = await TLMessageDialog.ShowAsync("This will send your current location to the bot.", "Share your location?", "OK", "Cancel");
-                if (confirm == ContentDialogResult.Primary)
+                else if (keyboardButton.Type is KeyboardButtonTypeRequestPoll requestPoll)
                 {
-                    var location = await _locationService.GetPositionAsync();
-                    if (location != null)
-                    {
-                        await SendGeoAsync(location.Point.Position.Latitude, location.Point.Position.Longitude);
-                    }
+                    await SendPollAsync(requestPoll.ForceQuiz, requestPoll.ForceRegular, _chat?.Type is ChatTypeSupergroup super && super.IsChannel);
                 }
-            }
-            else if (button is TLKeyboardButton keyboardButton)
-            {
-                await SendMessageAsync(keyboardButton.Text, null, true);
-            }
-        }
-
-        #endregion
-
-        #region Open reply
-
-        public RelayCommand<TLMessageCommonBase> MessageOpenReplyCommand { get; }
-        private async void MessageOpenReplyExecute(TLMessageCommonBase messageCommon)
-        {
-            if (messageCommon != null && messageCommon.ReplyToMsgId.HasValue)
-            {
-                await LoadMessageSliceAsync(messageCommon.Id, messageCommon.ReplyToMsgId.Value);
+                else if (keyboardButton.Type is KeyboardButtonTypeText textButton)
+                {
+                    await SendMessageAsync(keyboardButton.Text);
+                }
             }
         }
 
@@ -1164,16 +1210,16 @@ namespace Unigram.ViewModels
 
         #region Sticker info
 
-        public RelayCommand<TLMessage> MessageStickerPackInfoCommand { get; }
-        private async void MessageStickerPackInfoExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageAddStickerCommand { get; }
+        private void MessageAddStickerExecute(MessageViewModel message)
         {
-            if (message?.Media is TLMessageMediaDocument documentMedia && documentMedia.Document is TLDocument document)
+            if (message.Content is MessageSticker sticker && sticker.Sticker.SetId != 0)
             {
-                var stickerAttribute = document.Attributes.OfType<TLDocumentAttributeSticker>().FirstOrDefault();
-                if (stickerAttribute != null && stickerAttribute.StickerSet.TypeId != TLType.InputStickerSetEmpty)
-                {
-                    await StickerSetView.Current.ShowAsync(stickerAttribute.StickerSet);
-                }
+                OpenSticker(sticker.Sticker);
+            }
+            else if (message.Content is MessageText text && text.WebPage?.Sticker != null && text.WebPage.Sticker.SetId != 0)
+            {
+                OpenSticker(text.WebPage.Sticker);
             }
         }
 
@@ -1181,106 +1227,125 @@ namespace Unigram.ViewModels
 
         #region Fave sticker
 
-        public RelayCommand<TLMessage> MessageFaveStickerCommand { get; }
-        private void MessageFaveStickerExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageFaveStickerCommand { get; }
+        private void MessageFaveStickerExecute(MessageViewModel message)
         {
-            if (message.Media is TLMessageMediaDocument documentMedia && documentMedia.Document is TLDocument document)
+            var sticker = message.Content as MessageSticker;
+            if (sticker == null)
             {
-                _stickersService.AddRecentSticker(StickerType.Fave, document, (int)(Utils.CurrentTimestamp / 1000), false);
+                return;
             }
+
+            ProtoService.Send(new AddFavoriteSticker(new InputFileId(sticker.Sticker.StickerValue.Id)));
         }
 
         #endregion
 
         #region Unfave sticker
 
-        public RelayCommand<TLMessage> MessageUnfaveStickerCommand { get; }
-        private void MessageUnfaveStickerExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageUnfaveStickerCommand { get; }
+        private void MessageUnfaveStickerExecute(MessageViewModel message)
         {
-            if (message.Media is TLMessageMediaDocument documentMedia && documentMedia.Document is TLDocument document)
+            var sticker = message.Content as MessageSticker;
+            if (sticker == null)
             {
-                _stickersService.AddRecentSticker(StickerType.Fave, document, (int)(Utils.CurrentTimestamp / 1000), true);
+                return;
             }
-        }
 
-        #endregion
-
-        #region Save sticker as
-
-        public RelayCommand<TLMessage> MessageSaveStickerCommand { get; }
-        private async void MessageSaveStickerExecute(TLMessage message)
-        {
-            if (message?.Media is TLMessageMediaDocument documentMedia && documentMedia.Document is TLDocument document)
-            {
-                var fileName = document.GetFileName();
-                if (File.Exists(FileUtils.GetTempFileName(fileName)))
-                {
-                    var picker = new FileSavePicker();
-                    picker.FileTypeChoices.Add("WebP image", new[] { ".webp" });
-                    picker.FileTypeChoices.Add("PNG image", new[] { ".png" });
-                    picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
-                    picker.SuggestedFileName = "sticker.webp";
-
-                    var fileNameAttribute = document.Attributes.OfType<TLDocumentAttributeFilename>().FirstOrDefault();
-                    if (fileNameAttribute != null)
-                    {
-                        picker.SuggestedFileName = fileNameAttribute.FileName;
-                    }
-
-                    var file = await picker.PickSaveFileAsync();
-                    if (file != null)
-                    {
-                        var sticker = await FileUtils.GetTempFileAsync(fileName);
-
-                        if (Path.GetExtension(file.Name).Equals(".webp"))
-                        {
-                            await sticker.CopyAndReplaceAsync(file);
-                        }
-                        else if (Path.GetExtension(file.Name).Equals(".png"))
-                        {
-                            var buffer = await FileIO.ReadBufferAsync(sticker);
-                            var bitmap = WebPImage.DecodeFromBuffer(buffer);
-
-                            using (var stream = await file.OpenAsync(FileAccessMode.ReadWrite))
-                            {
-                                var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-                                var pixelStream = bitmap.PixelBuffer.AsStream();
-                                var pixels = new byte[pixelStream.Length];
-
-                                await pixelStream.ReadAsync(pixels, 0, pixels.Length);
-
-                                encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96.0, 96.0, pixels);
-                                await encoder.FlushAsync();
-                            }
-                        }
-                    }
-                }
-            }
+            ProtoService.Send(new RemoveFavoriteSticker(new InputFileId(sticker.Sticker.StickerValue.Id)));
         }
 
         #endregion
 
         #region Save file as
 
-        public RelayCommand<TLMessage> MessageSaveMediaCommand { get; }
-        private async void MessageSaveMediaExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageSaveMediaCommand { get; }
+        private async void MessageSaveMediaExecute(MessageViewModel message)
         {
-            if (message.IsSticker())
+            var result = message.Get().GetFileAndName(true);
+
+            var file = result.File;
+            if (file == null || !file.Local.IsDownloadingCompleted)
             {
-                MessageSaveStickerExecute(message);
                 return;
             }
 
-            var photo = message.GetPhoto();
-            if (photo?.Full is TLPhotoSize photoSize)
+            var fileName = result.FileName;
+            if (string.IsNullOrEmpty(fileName))
             {
-                await TLFileHelper.SavePhotoAsync(photoSize, message.Date);
+                fileName = Path.GetFileName(file.Local.Path);
             }
 
-            var document = message.GetDocument();
-            if (document != null)
+            var clean = ProtoService.Execute(new CleanFileName(fileName));
+            if (clean is Text text && !string.IsNullOrEmpty(text.TextValue))
             {
-                await TLFileHelper.SaveDocumentAsync(document, message.Date);
+                fileName = text.TextValue;
+            }
+
+            var extension = Path.GetExtension(fileName);
+            if (string.IsNullOrEmpty(extension))
+            {
+                extension = ".dat";
+            }
+
+            var picker = new FileSavePicker();
+            picker.FileTypeChoices.Add($"{extension.TrimStart('.').ToUpper()} File", new[] { extension });
+            picker.SuggestedStartLocation = PickerLocationId.Downloads;
+            picker.SuggestedFileName = fileName;
+
+            var picked = await picker.PickSaveFileAsync();
+            if (picked != null)
+            {
+                try
+                {
+                    var cached = await StorageFile.GetFileFromPathAsync(file.Local.Path);
+                    await cached.CopyAndReplaceAsync(picked);
+                }
+                catch { }
+            }
+        }
+
+        #endregion
+
+        #region Save to Downloads
+
+        public RelayCommand<MessageViewModel> MessageSaveDownloadCommand { get; }
+        private async void MessageSaveDownloadExecute(MessageViewModel message)
+        {
+            var result = message.Get().GetFileAndName(true);
+
+            var file = result.File;
+            if (file == null || !file.Local.IsDownloadingCompleted)
+            {
+                return;
+            }
+
+            var fileName = result.FileName;
+            if (string.IsNullOrEmpty(fileName))
+            {
+                fileName = Path.GetFileName(file.Local.Path);
+            }
+
+            var extension = Path.GetExtension(fileName);
+            if (string.IsNullOrEmpty(extension))
+            {
+                extension = ".dat";
+            }
+
+            var picker = new FileSavePicker();
+            picker.FileTypeChoices.Add($"{extension.TrimStart('.').ToUpper()} File", new[] { extension });
+            picker.SuggestedStartLocation = PickerLocationId.Downloads;
+            picker.SuggestedFileName = fileName;
+
+            var picked = await picker.PickSaveFileAsync();
+            if (picked != null)
+            {
+                try
+                {
+                    var cached = await StorageFile.GetFileFromPathAsync(file.Local.Path);
+                    await cached.CopyAndReplaceAsync(picked);
+                }
+                catch { }
             }
         }
 
@@ -1288,29 +1353,171 @@ namespace Unigram.ViewModels
 
         #region Save to GIFs
 
-        public RelayCommand<TLMessage> MessageSaveGIFCommand { get; }
-        private async void MessageSaveGIFExecute(TLMessage message)
+        public RelayCommand<MessageViewModel> MessageSaveAnimationCommand { get; }
+        private void MessageSaveAnimationExecute(MessageViewModel message)
         {
-            TLDocument document = null;
-            if (message?.Media is TLMessageMediaDocument documentMedia)
+            if (message.Content is MessageAnimation animation)
             {
-                document = documentMedia.Document as TLDocument;
+                ProtoService.Send(new AddSavedAnimation(new InputFileId(animation.Animation.AnimationValue.Id)));
             }
-            else if (message?.Media is TLMessageMediaWebPage webPageMedia && webPageMedia.WebPage is TLWebPage webPage)
+            else if (message.Content is MessageText text && text.WebPage != null && text.WebPage.Animation != null)
             {
-                document = webPage.Document as TLDocument;
+                ProtoService.Send(new AddSavedAnimation(new InputFileId(text.WebPage.Animation.AnimationValue.Id)));
             }
+        }
 
-            if (document == null)
+        #endregion
+
+        #region Open with
+
+        public RelayCommand<MessageViewModel> MessageOpenWithCommand { get; }
+        private async void MessageOpenWithExecute(MessageViewModel message)
+        {
+            var result = message.Get().GetFileAndName(true);
+
+            var file = result.File;
+            if (file == null || !file.Local.IsDownloadingCompleted)
             {
                 return;
             }
 
-            var response = await ProtoService.SaveGifAsync(new TLInputDocument { Id = document.Id, AccessHash = document.AccessHash }, false);
-            if (response.IsSucceeded)
+            var item = await StorageFile.GetFileFromPathAsync(file.Local.Path);
+
+            var options = new LauncherOptions();
+            options.DisplayApplicationPicker = true;
+
+            await Launcher.LaunchFileAsync(item, options);
+        }
+
+        #endregion
+
+        #region Show in folder
+
+        public RelayCommand<MessageViewModel> MessageOpenFolderCommand { get; }
+        private async void MessageOpenFolderExecute(MessageViewModel message)
+        {
+            var result = message.Get().GetFileAndName(true);
+
+            var file = result.File;
+            if (file == null || !file.Local.IsDownloadingCompleted)
             {
-                _stickers.StickersService.AddRecentGif(document, (int)(Utils.CurrentTimestamp / 1000));
+                return;
             }
+
+            var item = await StorageFile.GetFileFromPathAsync(file.Local.Path);
+            var folder = await item.GetParentAsync();
+
+            var options = new FolderLauncherOptions();
+            options.ItemsToSelect.Add(item);
+
+            await Launcher.LaunchFolderAsync(folder, options);
+        }
+
+        #endregion
+
+        #region Add contact
+
+        public RelayCommand<MessageViewModel> MessageAddContactCommand { get; }
+        private async void MessageAddContactExecute(MessageViewModel message)
+        {
+            var contact = message.Content as MessageContact;
+            if (contact == null)
+            {
+                return;
+            }
+
+            var user = CacheService.GetUser(contact.Contact.UserId);
+            if (user == null)
+            {
+                return;
+            }
+
+            var fullInfo = CacheService.GetUserFull(contact.Contact.UserId);
+            if (fullInfo == null)
+            {
+                fullInfo = await ProtoService.SendAsync(new GetUserFullInfo(contact.Contact.UserId)) as UserFullInfo;
+            }
+
+            if (fullInfo == null)
+            {
+                return;
+            }
+
+            var dialog = new EditUserNameView(user.FirstName, user.LastName, fullInfo.NeedPhoneNumberPrivacyException);
+
+            var confirm = await dialog.ShowQueuedAsync();
+            if (confirm == ContentDialogResult.Primary)
+            {
+                ProtoService.Send(new AddContact(new Telegram.Td.Api.Contact(user.PhoneNumber, dialog.FirstName, dialog.LastName, string.Empty, user.Id),
+                    fullInfo.NeedPhoneNumberPrivacyException ? dialog.SharePhoneNumber : true));
+            }
+        }
+
+        #endregion
+
+        #region Service message
+
+        public RelayCommand<MessageViewModel> MessageServiceCommand { get; }
+        private async void MessageServiceExecute(MessageViewModel message)
+        {
+            if (message.Content is MessageHeaderDate)
+            {
+                var date = BindConvert.Current.DateTime(message.Date);
+
+                var dialog = new Controls.Views.CalendarView();
+                dialog.MaxDate = DateTimeOffset.Now.Date;
+                dialog.SelectedDates.Add(date);
+
+                var confirm = await dialog.ShowQueuedAsync();
+                if (confirm == ContentDialogResult.Primary && dialog.SelectedDates.Count > 0)
+                {
+                    var first = dialog.SelectedDates.FirstOrDefault();
+                    var offset = first.Date.ToTimestamp();
+                    await LoadDateSliceAsync(offset);
+                }
+            }
+            else if (message.Content is MessagePinMessage pinMessage && pinMessage.MessageId != 0)
+            {
+                await LoadMessageSliceAsync(null, pinMessage.MessageId);
+            }
+        }
+
+        #endregion
+
+        #region Unvote poll
+
+        public RelayCommand<MessageViewModel> MessageUnvotePollCommand { get; }
+        private void MessageUnvotePollExecute(MessageViewModel message)
+        {
+            var poll = message.Content as MessagePoll;
+            if (poll == null)
+            {
+                return;
+            }
+
+            ProtoService.Send(new SetPollAnswer(message.ChatId, message.Id, new int[0]));
+        }
+
+        #endregion
+
+        #region Stop poll
+
+        public RelayCommand<MessageViewModel> MessageStopPollCommand { get; }
+        private async void MessageStopPollExecute(MessageViewModel message)
+        {
+            var poll = message.Content as MessagePoll;
+            if (poll == null)
+            {
+                return;
+            }
+
+            var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.StopPollAlertText, Strings.Resources.StopPollAlertTitle, Strings.Resources.Stop, Strings.Resources.Cancel);
+            if (confirm != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            ProtoService.Send(new StopPoll(message.ChatId, message.Id, null));
         }
 
         #endregion

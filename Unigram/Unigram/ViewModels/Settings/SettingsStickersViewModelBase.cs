@@ -5,109 +5,163 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Telegram.Api.Aggregator;
-using Telegram.Api.Helpers;
-using Telegram.Api.Services;
-using Telegram.Api.Services.Cache;
-using Telegram.Api.TL;
-using Telegram.Api.TL.Messages;
+using Telegram.Td.Api;
+using Unigram.Collections;
 using Unigram.Common;
-using Unigram.Core.Common;
+using Unigram.Controls;
+using Unigram.Controls.Views;
 using Unigram.Services;
+using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
 
 namespace Unigram.ViewModels.Settings
 {
-    public abstract class SettingsStickersViewModelBase : UnigramViewModelBase, IHandle<StickersDidLoadedEventArgs>, IHandle<FeaturedStickersDidLoadedEventArgs>, IHandle<ArchivedStickersCountDidLoadedEventArgs>
+    public abstract class SettingsStickersViewModelBase : TLViewModelBase, IHandle<UpdateInstalledStickerSets>, IHandle<UpdateTrendingStickerSets>, IHandle<UpdateRecentStickers>
     {
-        private readonly IStickersService _stickersService;
-        private readonly StickerType _type;
+        private readonly bool _masks;
 
         private bool _needReorder;
+        private IList<long> _newOrder;
 
-        public SettingsStickersViewModelBase(IMTProtoService protoService, ICacheService cacheService, ITelegramEventAggregator aggregator, IStickersService stickersService, StickerType type)
-            : base(protoService, cacheService, aggregator)
+        public SettingsStickersViewModelBase(IProtoService protoService, ICacheService cacheService, ISettingsService settingsService, IEventAggregator aggregator, bool masks)
+            : base(protoService, cacheService, settingsService, aggregator)
         {
-            _type = type;
-            _stickersService = stickersService;
+            _masks = masks;
 
-            Items = new MvxObservableCollection<TLMessagesStickerSet>();
+            Items = new MvxObservableCollection<StickerSetInfo>();
+            ReorderCommand = new RelayCommand<StickerSetInfo>(ReorderExecute);
 
-            ReorderCommand = new RelayCommand<TLMessagesStickerSet>(ReorderExecute);
+            StickerSetOpenCommand = new RelayCommand<StickerSetInfo>(StickerSetOpenExecute);
+            StickerSetHideCommand = new RelayCommand<StickerSetInfo>(StickerSetHideExecute);
+            StickerSetRemoveCommand = new RelayCommand<StickerSetInfo>(StickerSetRemoveExecute);
+            //StickerSetShareCommand = new RelayCommand<StickerSetInfo>(StickerSetShareExecute);
+            //StickerSetCopyCommand = new RelayCommand<StickerSetInfo>(StickerSetCopyExecute);
 
             Aggregator.Subscribe(this);
         }
 
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            if (mode == NavigationMode.New || mode == NavigationMode.Forward)
+            ProtoService.Send(new GetInstalledStickerSets(_masks), result =>
             {
-                Execute.BeginOnThreadPool(() =>
+                if (result is StickerSets stickerSets)
                 {
-                    var stickers = _stickersService.CheckStickers(_type);
-                    _stickersService.CheckArchivedStickersCount(_type);
-
-                    if (_type == StickerType.Image)
+                    ProtoService.Send(new GetRecentStickers(_masks), resultRecent =>
                     {
-                        var featured = _stickersService.CheckFeaturedStickers();
-                        if (featured) Handle(null as FeaturedStickersDidLoadedEventArgs);
-                    }
+                        if (resultRecent is Stickers recents && recents.StickersValue.Count > 0)
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(new[] { new StickerSetInfo(0, Strings.Resources.RecentStickers, "tg/recentlyUsed", null, false, false, false, false, _masks, false, recents.StickersValue.Count, recents.StickersValue) }.Union(stickerSets.Sets)));
+                        }
+                        else
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(stickerSets.Sets));
+                        }
+                    });
+                }
+            });
 
-                    if (stickers) ProcessStickerSets(_type);
-                    Handle(null as ArchivedStickersCountDidLoadedEventArgs);
-                });
+            ProtoService.Send(new GetArchivedStickerSets(_masks, 0, 1), result =>
+            {
+                if (result is StickerSets stickerSets)
+                {
+                    BeginOnUIThread(() => ArchivedStickersCount = stickerSets.TotalCount);
+                }
+            });
+
+            if (_masks)
+            {
+                return Task.CompletedTask;
             }
+
+            ProtoService.Send(new GetTrendingStickerSets(), result =>
+            {
+                if (result is StickerSets stickerSets)
+                {
+                    BeginOnUIThread(() => FeaturedStickersCount = stickerSets.TotalCount);
+                }
+            });
 
             return Task.CompletedTask;
         }
 
         public override Task OnNavigatedFromAsync(IDictionary<string, object> pageState, bool suspending)
         {
-            if (_needReorder)
+            if (_needReorder && _newOrder.Count > 0)
             {
                 _needReorder = false;
-                _stickersService.CalculateNewHash(_type);
+                ProtoService.Send(new ReorderInstalledStickerSets(_masks, _newOrder));
 
-                var stickers = _stickersService.GetStickerSets(_type);
-                var order = new TLVector<long>(stickers.Select(x => x.Set.Id));
+                //_stickersService.CalculateNewHash(_type);
 
-                ProtoService.ReorderStickerSetsAsync(_type == StickerType.Mask, order, null);
-                Aggregator.Publish(new StickersDidLoadedEventArgs(_type));
+                //var stickers = _stickersService.GetStickerSets(_type);
+                //var order = new TLVector<long>(stickers.Select(x => x.Set.Id));
+
+                //LegacyService.ReorderStickerSetsAsync(_type == StickerType.Mask, order, null);
+                //Aggregator.Publish(new StickersDidLoadedEventArgs(_type));
             }
 
             return Task.CompletedTask;
         }
 
-        public void Handle(StickersDidLoadedEventArgs e)
+        public void Handle(UpdateInstalledStickerSets update)
         {
-            if (e.Type == _type)
+            if (update.IsMasks != _masks)
             {
-                ProcessStickerSets(_type);
+                return;
             }
-        }
 
-        public void Handle(FeaturedStickersDidLoadedEventArgs e)
-        {
-            BeginOnUIThread(() =>
+            ProtoService.Send(new GetInstalledStickerSets(_masks), result =>
             {
-                FeaturedStickersCount = _stickersService.GetUnreadStickerSets().Count;
+                if (result is StickerSets stickerSets)
+                {
+                    ProtoService.Send(new GetRecentStickers(_masks), resultRecent =>
+                    {
+                        if (resultRecent is Stickers recents && recents.StickersValue.Count > 0)
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(new[] { new StickerSetInfo(0, Strings.Resources.RecentStickers, "tg/recentlyUsed", null, false, false, false, false, _masks, false, recents.StickersValue.Count, recents.StickersValue) }.Union(stickerSets.Sets)));
+                        }
+                        else
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(stickerSets.Sets));
+                        }
+                    });
+                }
             });
         }
 
-        public void Handle(ArchivedStickersCountDidLoadedEventArgs e)
+        public void Handle(UpdateTrendingStickerSets update)
         {
-            BeginOnUIThread(() =>
+            if (_masks)
             {
-                ArchivedStickersCount = _stickersService.GetArchivedStickersCount(_type);
-            });
+                return;
+            }
+
+            BeginOnUIThread(() => FeaturedStickersCount = update.StickerSets.TotalCount);
         }
 
-        private void ProcessStickerSets(StickerType type)
+        public void Handle(UpdateRecentStickers update)
         {
-            var stickers = _stickersService.GetStickerSets(type);
-            BeginOnUIThread(() =>
+            if (update.IsAttached != _masks)
             {
-                Items.ReplaceWith(stickers);
+                return;
+            }
+
+            ProtoService.Send(new GetInstalledStickerSets(_masks), result =>
+            {
+                if (result is StickerSets stickerSets)
+                {
+                    ProtoService.Send(new GetRecentStickers(_masks), resultRecent =>
+                    {
+                        if (resultRecent is Stickers recents && recents.StickersValue.Count > 0)
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(new[] { new StickerSetInfo(0, Strings.Resources.RecentStickers, "tg/recentlyUsed", null, false, false, false, false, _masks, false, recents.StickersValue.Count, recents.StickersValue) }.Union(stickerSets.Sets)));
+                        }
+                        else
+                        {
+                            BeginOnUIThread(() => Items.ReplaceWith(stickerSets.Sets));
+                        }
+                    });
+                }
             });
         }
 
@@ -137,21 +191,55 @@ namespace Unigram.ViewModels.Settings
             }
         }
 
-        public MvxObservableCollection<TLMessagesStickerSet> Items { get; private set; }
+        public MvxObservableCollection<StickerSetInfo> Items { get; private set; }
 
-        public RelayCommand<TLMessagesStickerSet> ReorderCommand { get; }
-        private void ReorderExecute(TLMessagesStickerSet set)
+        public RelayCommand<StickerSetInfo> ReorderCommand { get; }
+        private void ReorderExecute(StickerSetInfo set)
         {
-            var stickers = _stickersService.GetStickerSets(_type);
-            var index = Items.IndexOf(set);
-            var old = stickers.IndexOf(set);
-            if (old != index)
-            {
-                stickers.Remove(set);
-                stickers.Insert(index, set);
+            _needReorder = true;
+            _newOrder = Items.Where(x => x.Id != 0).Select(x => x.Id).ToList();
+        }
 
-                _needReorder = true;
+        #region Context menu
+
+        public RelayCommand<StickerSetInfo> StickerSetOpenCommand { get; }
+        private async void StickerSetOpenExecute(StickerSetInfo stickerSet)
+        {
+            if (stickerSet.Name.Equals("tg/recentlyUsed"))
+            {
+                var confirm = await TLMessageDialog.ShowAsync(Strings.Resources.ClearRecentEmoji, Strings.Resources.AppName, Strings.Resources.OK, Strings.Resources.Cancel);
+                if (confirm != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+
+                ProtoService.Send(new ClearRecentStickers(_masks));
+            }
+            else
+            {
+                await StickerSetView.GetForCurrentView().ShowAsync(stickerSet.Id);
             }
         }
+
+        public RelayCommand<StickerSetInfo> StickerSetHideCommand { get; }
+        private async void StickerSetHideExecute(StickerSetInfo stickerSet)
+        {
+            await ProtoService.SendAsync(new ChangeStickerSet(stickerSet.Id, false, true));
+            ProtoService.Send(new GetArchivedStickerSets(_masks, 0, 1), result =>
+            {
+                if (result is StickerSets stickerSets)
+                {
+                    BeginOnUIThread(() => ArchivedStickersCount = stickerSets.TotalCount);
+                }
+            });
+        }
+
+        public RelayCommand<StickerSetInfo> StickerSetRemoveCommand { get; }
+        private void StickerSetRemoveExecute(StickerSetInfo stickerSet)
+        {
+            ProtoService.Send(new ChangeStickerSet(stickerSet.Id, false, false));
+        }
+
+        #endregion
     }
 }

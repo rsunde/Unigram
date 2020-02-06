@@ -9,7 +9,7 @@ using Windows.UI.Xaml.Navigation;
 using Unigram.Views;
 using Template10.Common;
 using Windows.UI.Xaml.Media;
-using Unigram.Core.Services;
+using Unigram.Services;
 using Unigram.Views.Users;
 using System.Diagnostics;
 using Windows.UI.ViewManagement;
@@ -18,30 +18,152 @@ using Windows.Foundation.Metadata;
 using Windows.UI.Xaml.Hosting;
 using Windows.UI.Composition;
 using System.Numerics;
-
-// The Templated Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234235
+using System.Collections.Generic;
+using Unigram.Common;
 
 namespace Unigram.Controls
 {
-    public sealed class MasterDetailView : ContentControl
+    public sealed class MasterDetailView : ContentControl, IDisposable
     {
+        private MasterDetailPanel AdaptivePanel;
         private Frame DetailFrame;
         private ContentPresenter MasterPresenter;
         private Grid DetailPresenter;
-        private VisualStateGroup AdaptiveStates;
         private bool IsMasterHidden;
-        private const string NarrowState = "NarrowState";
 
         public NavigationService NavigationService { get; private set; }
         public Frame ParentFrame { get; private set; }
+
+        private readonly LinkedList<BackStackType> _backStack = new LinkedList<BackStackType>();
 
         public MasterDetailView()
         {
             DefaultStyleKey = typeof(MasterDetailView);
 
             Loaded += OnLoaded;
-            Unloaded += OnUnloaded;
             SizeChanged += OnSizeChanged;
+        }
+
+        #region Initialize
+
+        public void Initialize(string key, Frame parent, int session)
+        {
+            var service = WindowContext.GetForCurrentView().NavigationServices.GetByFrameId(key + session) as NavigationService;
+            if (service == null)
+            {
+                service = BootStrapper.Current.NavigationServiceFactory(BootStrapper.BackButton.Ignore, BootStrapper.ExistingContent.Exclude, session, key + session, false) as NavigationService;
+                service.SerializationService = TLSerializationService.Current;
+                service.Frame.DataContext = new object();
+                service.FrameFacade.BackRequested += OnBackRequested;
+            }
+
+            NavigationService = service;
+            DetailFrame = NavigationService.Frame;
+            ParentFrame = parent;
+        }
+
+        public void Dispose()
+        {
+            Loaded -= OnLoaded;
+            SizeChanged -= OnSizeChanged;
+
+            var service = NavigationService;
+            if (service != null)
+            {
+                service.FrameFacade.BackRequested -= OnBackRequested;
+            }
+
+            var panel = AdaptivePanel;
+            if (panel != null)
+            {
+                panel.ViewStateChanged -= OnViewStateChanged;
+            }
+
+            var frame = DetailFrame;
+            if (frame != null)
+            {
+                frame.Navigated -= OnNavigated;
+            }
+        }
+
+        private void OnBackRequested(object sender, HandledRoutedEventArgs args)
+        {
+            //var type = BackStackType.Navigation;
+            //if (_backStack.Count > 0)
+            //{
+            //    type = _backStack.Last.Value;
+            //    _backStack.RemoveLast();
+            //}
+
+            if (ParentFrame.Content is INavigatingPage masterPaging && CurrentState != MasterDetailState.Minimal)
+            {
+                masterPaging.OnBackRequesting(args);
+                if (args.Handled)
+                {
+                    return;
+                }
+            }
+
+            if (DetailFrame.Content is INavigablePage detailPage /*&& type == BackStackType.Navigation*/)
+            {
+                detailPage.OnBackRequested(args);
+                if (args.Handled)
+                {
+                    return;
+                }
+            }
+
+            // TODO: maybe checking for the actual width is not the perfect way,
+            // but if it is 0 it means that the control is not loaded, and the event shouldn't be handled
+            if (CanGoBack && ActualWidth > 0 /*&& type == BackStackType.Navigation*/)
+            {
+                DetailFrame.GoBack();
+                args.Handled = true;
+            }
+            else if (ParentFrame.Content is INavigablePage masterPage /*&& type == BackStackType.Hamburger*/)
+            {
+                masterPage.OnBackRequested(args);
+                if (args.Handled)
+                {
+                    return;
+                }
+            }
+            else if (ParentFrame.CanGoBack && ActualWidth > 0)
+            {
+                ParentFrame.GoBack();
+                args.Handled = true;
+            }
+        }
+
+        #endregion
+
+        public void Push(bool hamburger)
+        {
+            //if (hamburger)
+            //{
+            //    while (_backStack.Contains(BackStackType.Hamburger))
+            //    {
+            //        _backStack.Remove(BackStackType.Hamburger);
+            //    }
+            //}
+
+            //_backStack.AddLast(hamburger ? BackStackType.Hamburger : BackStackType.Navigation);
+        }
+
+        public bool Last()
+        {
+            if (_backStack.Count > 0)
+            {
+                return _backStack.Last.Value == BackStackType.Hamburger;
+            }
+
+            return false;
+        }
+
+        enum BackStackType
+        {
+            Hamburger,
+            Navigation
         }
 
         private void OnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -53,11 +175,11 @@ namespace Unigram.Controls
         {
             UpdateVisualState();
 
-            if (CurrentState == MasterDetailState.Narrow && DetailFrame.CurrentSourcePageType == BlankPageType)
+            if (CurrentState == MasterDetailState.Minimal && DetailFrame.CurrentSourcePageType == BlankPageType)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
-            else if (CurrentState == MasterDetailState.Filled)
+            else if (CurrentState == MasterDetailState.Compact || CurrentState == MasterDetailState.Expanded)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
@@ -66,17 +188,10 @@ namespace Unigram.Controls
                 MasterPresenter.Visibility = Visibility.Collapsed;
             }
 
-            if (CurrentState != MasterDetailState.Narrow && ViewStateChanged != null)
+            if (CurrentState != MasterDetailState.Minimal && ViewStateChanged != null)
             {
                 ViewStateChanged(this, EventArgs.Empty);
             }
-
-            App.AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
-        }
-
-        private void OnUnloaded(object sender, RoutedEventArgs e)
-        {
-            App.AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
         }
 
         private void UpdateVisualState()
@@ -86,7 +201,7 @@ namespace Unigram.Controls
             // else hide it.
             if (DetailFrame != null && DetailFrame.CanGoBack && !Windows.ApplicationModel.DesignMode.DesignModeEnabled)
             {
-                if (CurrentState != MasterDetailState.Narrow)
+                if (CurrentState != MasterDetailState.Minimal)
                 {
                     //if (DetailFrame.SourcePageType == typeof(DialogPage) ||
                     //    DetailFrame.SourcePageType == typeof(AboutPage) ||
@@ -108,34 +223,6 @@ namespace Unigram.Controls
             }
         }
 
-        //protected override void OnKeyDown(KeyRoutedEventArgs e)
-        //{
-        //    if (e.Key == VirtualKey.Escape)
-        //    {
-        //        if (DetailFrame.CanGoBack && CurrentState == MasterDetailState.Narrow)
-        //        {
-        //            DetailFrame.GoBack();
-        //            e.Handled = true;
-        //        }
-        //    }
-        //    else
-        //    {
-        //        base.OnKeyDown(e);
-        //    }
-        //}
-
-        private void Dispatcher_AcceleratorKeyActivated(CoreDispatcher sender, AcceleratorKeyEventArgs args)
-        {
-            if (args.VirtualKey == VirtualKey.Escape && !args.KeyStatus.IsKeyReleased)
-            {
-                if (DetailFrame.CanGoBack && CurrentState == MasterDetailState.Narrow)
-                {
-                    DetailFrame.GoBack();
-                    args.Handled = true;
-                }
-            }
-        }
-
         protected override void OnApplyTemplate()
         {
             if (Windows.ApplicationModel.DesignMode.DesignModeEnabled) return;
@@ -144,8 +231,10 @@ namespace Unigram.Controls
 
             MasterPresenter = (ContentPresenter)GetTemplateChild("MasterFrame");
             DetailPresenter = (Grid)GetTemplateChild("DetailPresenter");
-            AdaptiveStates = (VisualStateGroup)GetTemplateChild("AdaptiveStates");
-            AdaptiveStates.CurrentStateChanged += OnCurrentStateChanged;
+            AdaptivePanel = (MasterDetailPanel)GetTemplateChild("AdaptivePanel");
+            AdaptivePanel.ViewStateChanged += OnViewStateChanged;
+
+            MasterPresenter.RegisterPropertyChangedCallback(VisibilityProperty, OnVisibilityChanged);
 
             if (DetailFrame != null)
             {
@@ -155,42 +244,69 @@ namespace Unigram.Controls
                     VisualTreeHelper.DisconnectChildrenRecursive(parent);
                 }
 
-                DetailFrame.Navigated += OnNavigated;
-                DetailPresenter.Children.Add(DetailFrame);
+                //Grid.SetRow(DetailFrame, 1);
+                try
+                {
+                    DetailFrame.Navigated += OnNavigated;
+                    DetailPresenter.Children.Add(DetailFrame);
 
-                if (DetailFrame.CurrentSourcePageType == null)
-                {
-                    DetailFrame.Navigate(BlankPageType);
+                    if (DetailFrame.CurrentSourcePageType == null)
+                    {
+                        DetailFrame.Navigate(BlankPageType);
+                    }
+                    else
+                    {
+                        DetailFrame.BackStack.Insert(0, new PageStackEntry(BlankPageType, null, null));
+                    }
                 }
-                else
-                {
-                    DetailFrame.BackStack.Insert(0, new PageStackEntry(BlankPageType, null, null));
-                }
+                catch { }
             }
 
             if (ActualWidth > 0)
             {
                 UpdateVisualState();
 
-                if (CurrentState != MasterDetailState.Narrow && ViewStateChanged != null)
+                if (CurrentState != MasterDetailState.Minimal && ViewStateChanged != null)
                 {
                     ViewStateChanged(this, EventArgs.Empty);
                 }
             }
         }
 
+        private void OnVisibilityChanged(DependencyObject sender, DependencyProperty dp)
+        {
+            if (MasterPresenter.Visibility == Visibility.Visible)
+            {
+                Update?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
         private void OnNavigated(object sender, NavigationEventArgs e)
         {
-            if (AdaptiveStates.CurrentState == null)
+            if (AdaptivePanel == null)
             {
                 return;
             }
 
-            if (CurrentState == MasterDetailState.Narrow && e.SourcePageType == BlankPageType)
+            //if (e.Content is Page page)
+            //{
+            //    PageHeader = GetHeader(page);
+            //}
+            //else
+            //{
+            //    PageHeader = null;
+            //}
+
+            if (e.NavigationMode == NavigationMode.New && DetailFrame.CanGoBack)
+            {
+                Push(false);
+            }
+
+            if (CurrentState == MasterDetailState.Minimal && e.SourcePageType == BlankPageType)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
-            else if (CurrentState == MasterDetailState.Filled)
+            else if (CurrentState == MasterDetailState.Compact || CurrentState == MasterDetailState.Expanded)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
@@ -199,7 +315,7 @@ namespace Unigram.Controls
                 MasterPresenter.Visibility = Visibility.Collapsed;
             }
 
-            if (CurrentState == MasterDetailState.Narrow)
+            if (CurrentState == MasterDetailState.Minimal)
             {
                 if (e.NavigationMode == NavigationMode.New && DetailFrame.BackStackDepth == 1)
                 {
@@ -245,37 +361,37 @@ namespace Unigram.Controls
                     if (/*e.SourcePageType == typeof(AboutPage) ||*/ e.SourcePageType == typeof(SettingsPage))
                     {
                         // The user opened first a chat, then the userinfo. Remove them from backstack.
-                        if (DetailFrame.BackStackDepth == 3)
-                        {
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 2);
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
-                        }
-                        // Simple case of about or settings page
-                        else
-                        {
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
-                        }
+                        //if (DetailFrame.BackStackDepth == 3)
+                        //{
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 2);
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
+                        //}
+                        //// Simple case of about or settings page
+                        //else
+                        //{
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
+                        //}
                         UpdateVisualState();
 
                     }
                     // When the new page is a chat
-                    else if (e.SourcePageType == typeof(DialogPage))
+                    else if (e.SourcePageType == typeof(ChatPage))
                     {
                         // The user opened first a chat, then the userinfo. Remove them from backstack.
-                        if (DetailFrame.BackStackDepth == 3)
-                        {
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 2);
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
-                        }
-                        // Simple case of consecutive chats open
-                        else
-                        {
-                            DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
-                        }
+                        //if (DetailFrame.BackStackDepth == 3)
+                        //{
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 2);
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
+                        //}
+                        //// Simple case of consecutive chats open
+                        //else
+                        //{
+                        //    DetailFrame.BackStack.RemoveAt(DetailFrame.BackStackDepth - 1);
+                        //}
                         UpdateVisualState();
                     }
                     // When the new page is user info show the back button in titlebar.
-                    else if (e.SourcePageType == typeof(UserDetailsPage))
+                    else if (e.SourcePageType == typeof(ProfilePage))
                     {
                         UpdateVisualState();
                     }
@@ -288,60 +404,11 @@ namespace Unigram.Controls
             }
         }
 
-        #region Initialize
-        public void Initialize(string key, Frame parent)
-        {
-            var service = WindowWrapper.Current().NavigationServices.GetByFrameId(key) as NavigationService;
-            if (service == null)
-            {
-                service = BootStrapper.Current.NavigationServiceFactory(BootStrapper.BackButton.Ignore, BootStrapper.ExistingContent.Exclude) as NavigationService;
-                service.SerializationService = TLSerializationService.Current;
-                service.FrameFacade.FrameId = key;
-                service.FrameFacade.BackRequested += (s, args) =>
-                {
-                    if (DetailFrame.Content is IMasterDetailPage detailPage)
-                    {
-                        detailPage.OnBackRequested(args);
-                        if (args.Handled)
-                        {
-                            return;
-                        }
-                    }
-
-                    // TODO: maybe checking for the actual width is not the perfect way,
-                    // but if it is 0 it means that the control is not loaded, and the event shouldn't be handled
-                    if (CanGoBack && ActualWidth > 0)
-                    {
-                        DetailFrame.GoBack();
-                        args.Handled = true;
-                    }
-                    else if (ParentFrame.Content is IMasterDetailPage masterPage)
-                    {
-                        masterPage.OnBackRequested(args);
-                        if (args.Handled)
-                        {
-                            return;
-                        }
-                    }
-                    else if (ParentFrame.CanGoBack && ActualWidth > 0)
-                    {
-                        ParentFrame.GoBack();
-                        args.Handled = true;
-                    }
-                };
-            }
-
-            NavigationService = service;
-            DetailFrame = NavigationService.Frame;
-            ParentFrame = parent;
-        }
-        #endregion
-
-        private void OnCurrentStateChanged(object sender, VisualStateChangedEventArgs e)
+        private void OnViewStateChanged(object sender, EventArgs e)
         {
             ViewStateChanged?.Invoke(this, EventArgs.Empty);
 
-            if (CurrentState == MasterDetailState.Filled && IsMasterHidden)
+            if ((CurrentState == MasterDetailState.Compact || CurrentState == MasterDetailState.Expanded) && IsMasterHidden)
             {
                 //var anim = new DrillOutThemeAnimation();
                 //anim.EntranceTarget = MasterPresenter;
@@ -352,11 +419,11 @@ namespace Unigram.Controls
                 //board.Begin();
             }
 
-            if (CurrentState == MasterDetailState.Narrow && BlankPageType == DetailFrame?.CurrentSourcePageType)
+            if (CurrentState == MasterDetailState.Minimal && BlankPageType == DetailFrame?.CurrentSourcePageType)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
-            else if (CurrentState == MasterDetailState.Filled)
+            else if (CurrentState == MasterDetailState.Compact || CurrentState == MasterDetailState.Expanded)
             {
                 MasterPresenter.Visibility = Visibility.Visible;
             }
@@ -367,12 +434,13 @@ namespace Unigram.Controls
         }
 
         #region Public methods
+
         public bool CanGoBack
         {
             get
             {
                 return DetailFrame.CanGoBack;
-                
+
                 // BEFORE BACK NAVIGATION IN FILLED (WIDE) STATE FIX.
                 // return DetailFrame.CanGoBack && AdaptiveStates.CurrentState.Name == NarrowState;
             }
@@ -382,11 +450,18 @@ namespace Unigram.Controls
         {
             get
             {
-                return AdaptiveStates.CurrentState.Name == NarrowState ? MasterDetailState.Narrow : MasterDetailState.Filled;
+                if (AdaptivePanel == null)
+                {
+                    return MasterDetailState.Expanded;
+                }
+
+                return AdaptivePanel.CurrentState;
             }
         }
 
         public event EventHandler ViewStateChanged;
+        public event EventHandler Update;
+
         #endregion
 
         #region BlankType
@@ -399,16 +474,91 @@ namespace Unigram.Controls
         public static readonly DependencyProperty BlankPageTypeProperty =
             DependencyProperty.Register("BlankPageType", typeof(Type), typeof(MasterDetailView), new PropertyMetadata(typeof(BlankPage)));
         #endregion
+
+        #region AllowCompact
+
+        public bool AllowCompact
+        {
+            get
+            {
+                return AdaptivePanel?.AllowCompact ?? true;
+            }
+            set
+            {
+                if (AdaptivePanel != null)
+                {
+                    AdaptivePanel.AllowCompact = value;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Header
+
+        public static UIElement GetHeader(DependencyObject obj)
+        {
+            return (UIElement)obj.GetValue(HeaderProperty);
+        }
+
+        public static void SetHeader(DependencyObject obj, UIElement value)
+        {
+            obj.SetValue(HeaderProperty, value);
+        }
+
+        public static readonly DependencyProperty HeaderProperty =
+            DependencyProperty.RegisterAttached("Header", typeof(UIElement), typeof(MasterDetailView), new PropertyMetadata(null));
+
+        #endregion
+
+        #region PageHeader
+
+
+
+        public UIElement PageHeader
+        {
+            get { return (UIElement)GetValue(PageHeaderProperty); }
+            set { SetValue(PageHeaderProperty, value); }
+        }
+
+        // Using a DependencyProperty as the backing store for PageHeader.  This enables animation, styling, binding, etc...
+        public static readonly DependencyProperty PageHeaderProperty =
+            DependencyProperty.Register("PageHeader", typeof(UIElement), typeof(MasterDetailView), new PropertyMetadata(null));
+
+
+        #endregion
+
+        #region BackgroundOpacity
+
+        public double BackgroundOpacity
+        {
+            get { return (double)GetValue(BackgroundOpacityProperty); }
+            set { SetValue(BackgroundOpacityProperty, value); }
+        }
+
+        public static readonly DependencyProperty BackgroundOpacityProperty =
+            DependencyProperty.Register("BackgroundOpacity", typeof(double), typeof(MasterDetailView), new PropertyMetadata(1d));
+
+        #endregion
+
+        #region IsBlank
+
+        public bool IsBlank
+        {
+            get { return (bool)GetValue(IsBlankProperty); }
+            set { SetValue(IsBlankProperty, value); }
+        }
+
+        public static readonly DependencyProperty IsBlankProperty =
+            DependencyProperty.Register("IsBlank", typeof(bool), typeof(MasterDetailView), new PropertyMetadata(true));
+
+        #endregion
     }
 
     public enum MasterDetailState
     {
-        Narrow,
-        Filled
-    }
-
-    public interface IMasterDetailPage
-    {
-        void OnBackRequested(HandledEventArgs args);
+        Minimal,
+        Compact,
+        Expanded
     }
 }

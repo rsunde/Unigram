@@ -1,4 +1,4 @@
-﻿using Telegram.Api.TL;
+﻿using Telegram.Td.Api;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 
@@ -13,21 +13,22 @@ namespace Unigram.Selectors
 
         protected override DataTemplate SelectTemplateCore(object item, DependencyObject container)
         {
-            if (item == null)
+            if (item is Background wallpaper)
             {
-                return base.SelectTemplate(item);
-            }
+                if (wallpaper.Id == 1000001)
+                {
+                    return DefaultTemplate;
+                }
 
-            if (item is TLWallPaperSolid)
-            {
+                if (wallpaper.Id == Constants.WallpaperLocalId || wallpaper.Document != null)
+                {
+                    return ItemTemplate;
+                }
+
                 return SolidTemplate;
             }
-            else if (item is TLWallPaper wallpaper && wallpaper.Id.Equals(1000001))
-            {
-                return DefaultTemplate;
-            }
 
-            return ItemTemplate;
+            return base.SelectTemplateCore(item, container);
         }
     }
 }

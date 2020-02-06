@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Telegram.Td.Api;
+using Template10.Common;
+using Template10.Services.NavigationService;
+using Unigram.Services;
+using Unigram.Views.SignIn;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.UI.Xaml;
@@ -19,25 +24,15 @@ namespace Unigram.Views
     {
         public BlankPage()
         {
-            this.InitializeComponent();
+            InitializeComponent();
+            DataContext = new object();
         }
 
         protected override void OnNavigatedTo(NavigationEventArgs e)
         {
-            if (App.InMemoryState.ForwardMessages != null)
+            if (e.NavigationMode == NavigationMode.Back && Frame.ForwardStack.Any(x => x.SourcePageType == typeof(SignInPage)))
             {
-                Overlay.Visibility = Visibility.Visible;
-                EmptyLabel.Text = "Choose a recipient...";
-            }
-            else if (App.DataPackage != null)
-            {
-                Overlay.Visibility = Visibility.Visible;
-                EmptyLabel.Text = "Choose a recipient...";
-            }
-            else
-            {
-                Overlay.Visibility = Visibility.Collapsed;
-                EmptyLabel.Text = "Please select a chat to start messaging";
+                TLContainer.Current.Resolve<IProtoService>().Send(new Destroy());
             }
         }
     }

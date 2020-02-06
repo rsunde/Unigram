@@ -16,6 +16,7 @@ namespace Unigram.Controls
         }
 
         #region Glyph
+
         public string Glyph
         {
             get { return (string)GetValue(GlyphProperty); }
@@ -24,18 +25,32 @@ namespace Unigram.Controls
 
         public static readonly DependencyProperty GlyphProperty =
             DependencyProperty.Register("Glyph", typeof(string), typeof(GlyphRadioButton), new PropertyMetadata(null));
+
         #endregion
 
-        #region CornerRadius
+        #region CheckedGlyph
 
-        public CornerRadius CornerRadius
+        public string CheckedGlyph
         {
-            get { return (CornerRadius)GetValue(CornerRadiusProperty); }
-            set { SetValue(CornerRadiusProperty, value); }
+            get { return (string)GetValue(CheckedGlyphProperty); }
+            set { SetValue(CheckedGlyphProperty, value); }
         }
 
-        public static readonly DependencyProperty CornerRadiusProperty =
-            DependencyProperty.Register("CornerRadius", typeof(CornerRadius), typeof(GlyphRadioButton), new PropertyMetadata(default(CornerRadius)));
+        public static readonly DependencyProperty CheckedGlyphProperty =
+            DependencyProperty.Register("CheckedGlyph", typeof(string), typeof(GlyphRadioButton), new PropertyMetadata(null));
+
+        #endregion
+
+        #region Radius
+
+        public CornerRadius Radius
+        {
+            get { return (CornerRadius)GetValue(RadiusProperty); }
+            set { SetValue(RadiusProperty, value); }
+        }
+
+        public static readonly DependencyProperty RadiusProperty =
+            DependencyProperty.Register("Radius", typeof(CornerRadius), typeof(GlyphRadioButton), new PropertyMetadata(default(CornerRadius)));
 
         #endregion
 

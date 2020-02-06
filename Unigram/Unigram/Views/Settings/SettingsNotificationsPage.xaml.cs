@@ -24,15 +24,17 @@ namespace Unigram.Views.Settings
         public SettingsNotificationsPage()
         {
             InitializeComponent();
-            DataContext = UnigramContainer.Current.ResolveType<SettingsNotificationsViewModel>();
+            DataContext = TLContainer.Current.Resolve<SettingsNotificationsViewModel>();
         }
 
-        protected override void OnNavigatedTo(NavigationEventArgs e)
+        #region Binding
+
+        private string ConvertCountInfo(bool count)
         {
-            while (Frame.BackStackDepth > 1)
-            {
-                Frame.BackStack.RemoveAt(1);
-            }
+            return count ? "Switch off to show the number of unread chats instead of messages" : "Switch on to show the number of unread messages instead of chats";
         }
+
+        #endregion
+
     }
 }

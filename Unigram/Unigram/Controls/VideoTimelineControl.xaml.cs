@@ -1,8 +1,9 @@
 ﻿using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
-using Telegram.Api.Helpers;
+using Unigram.Common;
 using Windows.Graphics.Imaging;
 using Windows.Media.Editing;
 using Windows.Storage;
@@ -74,7 +75,7 @@ namespace Unigram.Controls
 
             if (storageFile != null)
             {
-                Execute.BeginOnThreadPool(TimeSpan.FromSeconds(1.0), async () =>
+                Task.Delay(1000).ContinueWith(async (_) =>
                 {
                     _videoProperties = storageFile.Properties.GetVideoPropertiesAsync().AsTask().Result;
                     if (_videoProperties == null) return;
@@ -197,7 +198,7 @@ namespace Unigram.Controls
         {
             _isManipulating = true;
 
-            Execute.BeginOnThreadPool(async () =>
+            Task.Run(async () =>
             {
                 TimeSpan processedPosition;
                 while (_isManipulating)
